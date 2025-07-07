@@ -8,8 +8,8 @@
 #include "../../../../../nn_models/mlp/operations_generic.h"
 #include "../../../../../nn_models/sequential/operations_generic.h"
 #include "../../../../../nn_models/random_uniform/operations_generic.h"
-#include "../../../../../rl/algorithms/sac/operations_generic.h"
 #include "../../../../../nn/optimizers/adam/operations_generic.h"
+#include "../../../../../rl/algorithms/sac/operations_generic.h"
 #include "../../../../../rl/components/off_policy_runner/operations_generic.h"
 
 #include "config.h"
