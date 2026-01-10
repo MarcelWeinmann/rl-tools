@@ -316,7 +316,7 @@ namespace rl_tools{
         }
         if constexpr(CPU_DEVICE){
             T output_matrix_value = get(output_matrix_view, 0, 0);
-            add_scalar(device, device.logger, "critic_value", output_matrix_value, 10001);
+            add_scalar(device, device.logger, "critic_value", output_matrix_value, 1000);
             if constexpr(SPEC::PARAMETERS::MASK_NON_TERMINAL){
                 // for the loss and average value calculation
                 auto output_temp = output(device, critic);
