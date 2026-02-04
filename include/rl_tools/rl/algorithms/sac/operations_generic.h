@@ -249,7 +249,7 @@ namespace rl_tools{
         constexpr TI SEQUENCE_LENGTH = BATCH_SPEC::SEQUENCE_LENGTHH;
         // static_assert(SEQUENCE_LENGTH >= 2, "currently only supports sequence length >= 2");
         constexpr TI BATCH_SIZE = BATCH_SPEC::BATCH_SIZE;
-        constexpr bool CPU_DEVICE = DEVICE::DEVICE_ID == devices::DeviceId::CPU || DEVICE::DEVICE_ID == devices::DeviceId::CPU_ACCELERATE || DEVICE::DEVICE_ID == devices::DeviceId::CPU_BLAS || DEVICE::DEVICE_ID == devices::DeviceId::CPU_MKL;
+        constexpr bool CPU_DEVICE = DEVICE::DEVICE_ID == devices::DeviceId::CPU || DEVICE::DEVICE_ID == devices::DeviceId::CPU_ACCELERATE || DEVICE::DEVICE_ID == devices::DeviceId::CPU_BLAS || DEVICE::DEVICE_ID == devices::DeviceId::CPU_OPENBLAS || DEVICE::DEVICE_ID == devices::DeviceId::CPU_MKL;
         constexpr TI ACTION_DIM = SPEC::ENVIRONMENT::ACTION_DIM;
         static_assert(SPEC::PARAMETERS::SEQUENCE_LENGTH == SEQUENCE_LENGTH, "Specification SEQUENCE_LENGTH should be equal to the batch sequence length");
 //        static_assert(BATCH_SIZE == SPEC::PARAMETERS::CRITIC_BATCH_SIZE);
