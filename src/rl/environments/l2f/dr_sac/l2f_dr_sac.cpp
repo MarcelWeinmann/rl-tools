@@ -306,7 +306,7 @@ int main(int argc, char** argv){
         rlt::sample_initial_parameters(device, env, env_parameters, rng);
         parameters_json = rlt::json(device, env, env_parameters);
         rlt::compare_parameters(device, env_parameters_nominal, env_parameters);
-        rlt::set_parameters(device, ts.off_policy_runner, env_parameters);
+        rlt::set_parameters(device, ts.off_policy_runner_online, env_parameters);
 #ifndef BENCHMARK
         ts.env_eval_parameters = env_parameters;
 #endif
@@ -328,8 +328,8 @@ int main(int argc, char** argv){
         //     max_angle = 90.0/180.0*rlt::math::PI<T>;
         // }
         if(set_max_angle){
-            for(TI env_i=0; env_i < decltype(ts.off_policy_runner)::N_ENVIRONMENTS; env_i++){
-                auto& env = get(ts.off_policy_runner.envs, 0, env_i);
+            for(TI env_i=0; env_i < decltype(ts.off_policy_runner_online)::N_ENVIRONMENTS; env_i++){
+                auto& env = get(ts.off_policy_runner_online.envs, 0, env_i);
                 env.parameters.mdp.init.max_angle = max_angle;
             }
 #ifndef BENCHMARK

@@ -137,25 +137,25 @@ void test(typename TYPE_POLICY::DEFAULT& return_value, typename TYPE_POLICY::DEF
             if constexpr(!GPU_ACTOR_ROLLOUT) {
                 rlt::copy(device_init, device, ts_init.actor_critic.actor, ts.actor_critic.actor);
             }
-            rlt::step<1>(device, ts.off_policy_runner, ts.actor_critic.actor, ts.actor_buffers_eval, ts.rng);
+            rlt::step<1>(device, ts.off_policy_runner_online, ts.actor_critic.actor, ts.actor_buffers_eval, ts.rng);
         }
         else {
             if constexpr(GPU_ACTOR_ROLLOUT){
                 rlt::copy(device, device_init, ts.actor_critic.actor, ts_init.actor_critic.actor);
             }
-            rlt::step<1>(device_init, ts_init.off_policy_runner, ts_init.actor_critic.actor, ts_init.actor_buffers_eval, ts_init.rng);
+            rlt::step<1>(device_init, ts_init.off_policy_runner_online, ts_init.actor_critic.actor, ts_init.actor_buffers_eval, ts_init.rng);
         }
         if(step > CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS){
             if(step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0) {
                 for(int critic_i = 0; critic_i < 2; critic_i++){
                     if constexpr(GPU_ROLLOUT) {
-                        rlt::gather_batch(device, ts.off_policy_runner, ts.critic_batch, ts.rng);
+                        rlt::gather_batch(device, ts.off_policy_runner_online, ts.critic_batch, ts.rng);
                         if constexpr(CPU_TRAINING){
                             rlt::copy(device, device_init, ts.critic_batch, ts_init.critic_batch);
                         }
                     }
                     else {
-                        rlt::gather_batch(device_init, ts_init.off_policy_runner, ts_init.critic_batch, ts_init.rng);
+                        rlt::gather_batch(device_init, ts_init.off_policy_runner_online, ts_init.critic_batch, ts_init.rng);
                         rlt::copy(device_init, device, ts_init.critic_batch, ts.critic_batch);
                     }
                     if constexpr(GPU_NOISE) {
@@ -186,13 +186,13 @@ void test(typename TYPE_POLICY::DEFAULT& return_value, typename TYPE_POLICY::DEF
             if(step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::ACTOR_TRAINING_INTERVAL == 0) {
                 {
                     if constexpr(GPU_ROLLOUT) {
-                        rlt::gather_batch(device, ts.off_policy_runner, ts.actor_batch, ts.rng);
+                        rlt::gather_batch(device, ts.off_policy_runner_online, ts.actor_batch, ts.rng);
                         if constexpr(CPU_TRAINING){
                             rlt::copy(device, device_init, ts.actor_batch, ts_init.actor_batch);
                         }
                     }
                     else {
-                        rlt::gather_batch(device_init, ts_init.off_policy_runner, ts_init.actor_batch, ts_init.rng);
+                        rlt::gather_batch(device_init, ts_init.off_policy_runner_online, ts_init.actor_batch, ts_init.rng);
                         rlt::copy(device_init, device, ts_init.actor_batch, ts.actor_batch);
                     }
                     if constexpr(GPU_NOISE) {

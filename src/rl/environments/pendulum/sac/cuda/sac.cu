@@ -125,7 +125,7 @@ int main() {
         {
             cudaStreamBeginCapture(device.stream, cudaStreamCaptureModeGlobal);
             device.graph_capture_active = true;
-            rlt::step<1>(device, ts.off_policy_runner, ts.actor_critic.actor, ts.actor_buffers_eval, ts.rng);
+            rlt::step<1>(device, ts.off_policy_runner_online, ts.actor_critic.actor, ts.actor_buffers_eval, ts.rng);
             cudaStreamEndCapture(device.stream, &step_graph);
             device.graph_capture_active = false;
             rlt::check_status(device);
@@ -137,7 +137,7 @@ int main() {
             cudaStreamBeginCapture(device.stream, cudaStreamCaptureModeGlobal);
             device.graph_capture_active = true;
             for(int critic_i = 0; critic_i < 2; critic_i++){
-                rlt::gather_batch(device, ts.off_policy_runner, ts.critic_batch, ts.rng);
+                rlt::gather_batch(device, ts.off_policy_runner_online, ts.critic_batch, ts.rng);
                 rlt::randn(device, ts.action_noise_critic, ts.rng);
                 rlt::train_critic(device, ts.actor_critic, ts.actor_critic.critics[critic_i], ts.critic_batch, ts.actor_critic.critic_optimizers[critic_i], ts.actor_target_buffers[critic_i], ts.critic_buffers[critic_i], ts.critic_target_buffers[critic_i], ts.critic_training_buffers[critic_i], ts.action_noise_critic, ts.rng);
             }
@@ -152,7 +152,7 @@ int main() {
         {
             cudaStreamBeginCapture(device.stream, cudaStreamCaptureModeGlobal);
             device.graph_capture_active = true;
-            rlt::gather_batch(device, ts.off_policy_runner, ts.actor_batch, ts.rng);
+            rlt::gather_batch(device, ts.off_policy_runner_online, ts.actor_batch, ts.rng);
             rlt::randn(device, ts.action_noise_actor, ts.rng);
             rlt::train_actor(device, ts.actor_critic, ts.actor_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.critic_buffers[0], ts.actor_training_buffers, ts.action_noise_actor, ts.rng);
             rlt::update_critic_targets(device, ts.actor_critic);
@@ -207,17 +207,17 @@ int main() {
 
             // Training
             rlt::set_step(device, device.logger, step);
-            rlt::step<1>(device, ts.off_policy_runner, ts.actor_critic.actor, ts.actor_buffers_eval, ts.rng);
+            rlt::step<1>(device, ts.off_policy_runner_online, ts.actor_critic.actor, ts.actor_buffers_eval, ts.rng);
             if(step > CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS){
                 if(step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0) {
                     for(TI critic_i = 0; critic_i < 2; critic_i++){
-                        rlt::gather_batch(device, ts.off_policy_runner, ts.critic_batch, ts.rng);
+                        rlt::gather_batch(device, ts.off_policy_runner_online, ts.critic_batch, ts.rng);
                         rlt::randn(device, ts.action_noise_critic, ts.rng);
                         rlt::train_critic(device, ts.actor_critic, ts.actor_critic.critics[critic_i], ts.critic_batch, ts.actor_critic.critic_optimizers[critic_i], ts.actor_target_buffers[critic_i], ts.critic_buffers[critic_i], ts.critic_target_buffers[critic_i], ts.critic_training_buffers[critic_i], ts.action_noise_critic, ts.rng);
                     }
                 }
                 if(step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::ACTOR_TRAINING_INTERVAL == 0) {
-                    rlt::gather_batch(device, ts.off_policy_runner, ts.actor_batch, ts.rng);
+                    rlt::gather_batch(device, ts.off_policy_runner_online, ts.actor_batch, ts.rng);
                     rlt::randn(device, ts.action_noise_actor, ts.rng);
                     rlt::train_actor(device, ts.actor_critic, ts.actor_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.critic_buffers[0], ts.actor_training_buffers, ts.action_noise_actor, ts.rng);
                     rlt::update_critic_targets(device, ts.actor_critic);

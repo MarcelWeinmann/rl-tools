@@ -142,8 +142,8 @@ void print_sizes(DEVICE& device, LOOP_STATE& ts){
     rlt::log(device, device.logger, "ActorCritic.critics[1] size: ", sizeof(ts.actor_critic.critics[1]));
     rlt::log(device, device.logger, "ActorCritic.critics_target[0] size: ", sizeof(ts.actor_critic.critics_target[0]));
     rlt::log(device, device.logger, "ActorCritic.critics_target[1] size: ", sizeof(ts.actor_critic.critics_target[1]));
-    rlt::log(device, device.logger, "OffPolicyRunner size: ", sizeof(ts.off_policy_runner));
-    rlt::log(device, device.logger, "OffPolicyRunner.replay_buffers size: ", sizeof(ts.off_policy_runner.replay_buffers));
+    rlt::log(device, device.logger, "OffPolicyRunner size: ", sizeof(ts.off_policy_runner_online));
+    rlt::log(device, device.logger, "OffPolicyRunner.replay_buffers size: ", sizeof(ts.off_policy_runner_online.replay_buffers));
     rlt::log(device, device.logger, "CriticBatch size: ", sizeof(ts.critic_batch));
     rlt::log(device, device.logger, "CriticTrainingBuffers size: ", sizeof(ts.critic_training_buffers));
     rlt::log(device, device.logger, "CriticBuffers size: ", sizeof(ts.critic_buffers));
@@ -151,7 +151,7 @@ void print_sizes(DEVICE& device, LOOP_STATE& ts){
     rlt::log(device, device.logger, "ActorTrainingBuffers size: ", sizeof(ts.actor_training_buffers));
     rlt::log(device, device.logger, "ActorBuffers size: ", sizeof(ts.actor_buffers));
     rlt::log(device, device.logger, "ActorBuffersEval size: ", sizeof(ts.actor_buffers_eval));
-    TI accounted_for = sizeof(ts.actor_critic) + sizeof(ts.off_policy_runner) + sizeof(ts.critic_batch) + sizeof(ts.critic_training_buffers) + sizeof(ts.critic_buffers) + sizeof(ts.actor_batch) + sizeof(ts.actor_training_buffers) + sizeof(ts.actor_buffers) + sizeof(ts.actor_buffers_eval);
+    TI accounted_for = sizeof(ts.actor_critic) + sizeof(ts.off_policy_runner_online) + sizeof(ts.critic_batch) + sizeof(ts.critic_training_buffers) + sizeof(ts.critic_buffers) + sizeof(ts.actor_batch) + sizeof(ts.actor_training_buffers) + sizeof(ts.actor_buffers) + sizeof(ts.actor_buffers_eval);
     rlt::log(device, device.logger, "Total (accounted for): ", accounted_for);
     rlt::log(device, device.logger, "Total: ", sizeof(ts));
 }

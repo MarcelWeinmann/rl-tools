@@ -427,6 +427,24 @@ namespace rl_tools{
             gather_batch_step<DETERMINISTIC>(device, runner, replay_buffer, batch, batch_step_i, rng);
         }
     }
+
+    template <typename DEVICE, typename SPEC, typename BATCH_SPEC, typename RNG, bool DETERMINISTIC=false>
+    RL_TOOLS_FUNCTION_PLACEMENT void gather_dual_batch(DEVICE& device, rl::components::OffPolicyRunner<SPEC>& runner_offline, rl::components::OffPolicyRunner<SPEC>& runner_online, rl::components::off_policy_runner::SequentialBatch<BATCH_SPEC>& batch, typename SPEC::TYPE_POLICY::DEFAULT offline_buffer_share, RNG& rng){
+        static_assert(utils::typing::is_same_v<SPEC, typename BATCH_SPEC::SPEC>);
+        using TI = typename SPEC::TI;
+        constexpr TI BATCH_SIZE = BATCH_SPEC::BATCH_SIZE;
+        TI OFFLINE_BATCH_SIZE = BATCH_SPEC::BATCH_SIZE * offline_buffer_share;
+        for(TI batch_step_i=0; batch_step_i < BATCH_SIZE; batch_step_i++) {
+            TI env_i = DETERMINISTIC ? 0 : random::uniform_int_distribution(typename DEVICE::SPEC::RANDOM(), (TI) 0, (TI)(SPEC::PARAMETERS::N_ENVIRONMENTS - 1), rng);
+            if (batch_step_i < OFFLINE_BATCH_SIZE) {
+                auto& replay_buffer = get(runner_offline.replay_buffers, 0, env_i);
+                gather_batch_step<DETERMINISTIC>(device, runner_offline, replay_buffer, batch, batch_step_i, rng);
+            } else {
+                auto& replay_buffer = get(runner_online.replay_buffers, 0, env_i);
+                gather_batch_step<DETERMINISTIC>(device, runner_online, replay_buffer, batch, batch_step_i, rng);
+            }
+        }
+    }
 //    template<typename SOURCE_DEVICE, typename TARGET_DEVICE,  typename SOURCE_SPEC, typename TARGET_SPEC>
 //    void copy(SOURCE_DEVICE& source_device, TARGET_DEVICE& target_device, const  rl::components::off_policy_runner::Batch<SOURCE_SPEC>& source, nn_models::mlp::NeuralNetworkBuffersForwardBackward<TARGET_SPEC>& target){
 //        copy(source_device, target_device, (nn_models::mlp::NeuralNetworkBuffers<SOURCE_SPEC>&)source, (nn_models::mlp::NeuralNetworkBuffers<TARGET_SPEC>&)target);

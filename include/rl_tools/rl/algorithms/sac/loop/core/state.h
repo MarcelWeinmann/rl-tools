@@ -20,9 +20,10 @@ namespace rl_tools{
             // typename CONFIG::NN::CRITIC_OPTIMIZER critic_optimizers[2];
             // typename CONFIG::NN::ALPHA_OPTIMIZER alpha_optimizer;
             typename CONFIG::RNG rng;
-            rl::components::OffPolicyRunner<typename CONFIG::OFF_POLICY_RUNNER_SPEC> off_policy_runner;
-            typename CONFIG::ENVIRONMENT envs[decltype(off_policy_runner)::N_ENVIRONMENTS];
-            typename CONFIG::ENVIRONMENT::Parameters env_parameters[decltype(off_policy_runner)::N_ENVIRONMENTS];
+            rl::components::OffPolicyRunner<typename CONFIG::OFF_POLICY_RUNNER_SPEC> off_policy_runner_offline;
+            rl::components::OffPolicyRunner<typename CONFIG::OFF_POLICY_RUNNER_SPEC> off_policy_runner_online;
+            typename CONFIG::ENVIRONMENT envs[decltype(off_policy_runner_online)::N_ENVIRONMENTS];
+            typename CONFIG::ENVIRONMENT::Parameters env_parameters[decltype(off_policy_runner_online)::N_ENVIRONMENTS];
             typename CONFIG::ACTOR_CRITIC_TYPE actor_critic;
             rl::components::off_policy_runner::SequentialBatch<typename CONFIG::CRITIC_BATCH_SPEC> critic_batch;
             rl::algorithms::sac::CriticTrainingBuffers<rl::algorithms::sac::CriticTrainingBuffersSpecification<typename CONFIG::ACTOR_CRITIC_SPEC, CONFIG::DYNAMIC_ALLOCATION>> critic_training_buffers[2];

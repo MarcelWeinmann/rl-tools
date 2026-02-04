@@ -20,7 +20,8 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT void malloc(DEVICE& device, rl::algorithms::sac::loop::core::State<T_CONFIG>& ts, typename T_CONFIG::TI seed = 0){
         malloc(device, ts.rng);
         malloc(device, ts.actor_critic);
-        malloc(device, ts.off_policy_runner);
+        malloc(device, ts.off_policy_runner_offline);
+        malloc(device, ts.off_policy_runner_online);
         malloc(device, ts.critic_batch);
         malloc(device, ts.critic_training_buffers[0]);
         malloc(device, ts.critic_training_buffers[1]);
@@ -46,7 +47,8 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT void free(DEVICE& device, rl::algorithms::sac::loop::core::State<T_CONFIG>& ts){
         free(device, ts.rng);
         free(device, ts.actor_critic);
-        free(device, ts.off_policy_runner);
+        free(device, ts.off_policy_runner_offline);
+        free(device, ts.off_policy_runner_online);
         free(device, ts.critic_batch);
         free(device, ts.critic_training_buffers[0]);
         free(device, ts.critic_training_buffers[1]);
@@ -82,14 +84,16 @@ namespace rl_tools{
             rl_tools::init(device, ts.envs[env_i]);
         }
 
-        init(device, ts.off_policy_runner);
+        init(device, ts.off_policy_runner_offline);
+        init(device, ts.off_policy_runner_online);
 
         ts.step = 0;
     }
     template <typename DEVICE_SOURCE, typename DEVICE_TARGET, typename T_CONFIG_SOURCE, typename T_CONFIG_TARGET>
     RL_TOOLS_FUNCTION_PLACEMENT void copy(DEVICE_SOURCE& device_source, DEVICE_TARGET& device_target, rl::algorithms::sac::loop::core::State<T_CONFIG_SOURCE>& source, rl::algorithms::sac::loop::core::State<T_CONFIG_TARGET>& target){
         copy(device_source, device_target, source.actor_critic, target.actor_critic);
-        copy(device_source, device_target, source.off_policy_runner, target.off_policy_runner);
+        copy(device_source, device_target, source.off_policy_runner_offline, target.off_policy_runner_offline);
+        copy(device_source, device_target, source.off_policy_runner_online, target.off_policy_runner_online);
         copy(device_source, device_target, source.critic_batch, target.critic_batch);
         copy(device_source, device_target, source.critic_training_buffers[0], target.critic_training_buffers[0]);
         copy(device_source, device_target, source.critic_training_buffers[1], target.critic_training_buffers[1]);
@@ -109,29 +113,31 @@ namespace rl_tools{
     template <typename DEVICE, typename T_CONFIG>
     RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::algorithms::sac::loop::core::State<T_CONFIG>& ts){
         using CONFIG = T_CONFIG;
+        using T = typename CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::T;
+        T offline_buffer_share = ts.step >= CONFIG::CORE_PARAMETERS::N_PRETRAIN_STEPS ? CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::OFFLINE_BUFFER_SHARE : 0.0;
         if(ts.step >= CONFIG::CORE_PARAMETERS::STEP_LIMIT){
             return true;
         }
         set_step(device, device.logger, ts.step);
         if(ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS){
-            step<1>(device, ts.off_policy_runner, get_actor(ts), ts.actor_buffers_eval, ts.rng);
+            step<1>(device, ts.off_policy_runner_offline, get_actor(ts), ts.actor_buffers_eval, ts.rng);
         }
         else{
             typename CONFIG::EXPLORATION_POLICY exploration_policy;
             typename CONFIG::EXPLORATION_POLICY::template Buffer<> exploration_policy_buffer;
-            step<0>(device, ts.off_policy_runner, exploration_policy, exploration_policy_buffer, ts.rng);
+            step<0>(device, ts.off_policy_runner_online, exploration_policy, exploration_policy_buffer, ts.rng);
         }
-        bool train_critic_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0;
-        bool update_critic_targets_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TARGET_UPDATE_INTERVAL == 0;
+        bool train_critic_flag = ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0;
+        bool update_critic_targets_flag = ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TARGET_UPDATE_INTERVAL == 0;
         bool train_actor_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_ACTOR && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::ACTOR_TRAINING_INTERVAL == 0;
         if(CONFIG::CORE_PARAMETERS::SHARED_BATCH && (train_critic_flag || train_actor_flag)){
-            gather_batch(device, ts.off_policy_runner, ts.critic_batch, ts.rng);
+            gather_dual_batch(device, ts.off_policy_runner_offline, ts.off_policy_runner_online, ts.critic_batch, offline_buffer_share, ts.rng);
             randn(device, ts.action_noise_critic, ts.rng);
         }
         if(train_critic_flag){
             for(int critic_i = 0; critic_i < 2; critic_i++){
                 if constexpr(!CONFIG::CORE_PARAMETERS::SHARED_BATCH){
-                    gather_batch(device, ts.off_policy_runner, ts.critic_batch, ts.rng);
+                    gather_dual_batch(device, ts.off_policy_runner_offline, ts.off_policy_runner_online, ts.critic_batch, offline_buffer_share, ts.rng);
                     randn(device, ts.action_noise_critic, ts.rng);
                 }
                 train_critic(device, ts.actor_critic, ts.actor_critic.critics[critic_i], ts.critic_batch, ts.actor_critic.critic_optimizers[critic_i], ts.actor_target_buffers[critic_i], ts.critic_buffers[critic_i], ts.critic_target_buffers[critic_i], ts.critic_training_buffers[critic_i], ts.action_noise_critic, ts.rng);
@@ -146,7 +152,7 @@ namespace rl_tools{
                 train_actor(device, ts.actor_critic, ts.critic_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.critic_buffers[0], ts.actor_training_buffers, ts.action_noise_actor, ts.rng);
             }
             else{
-                gather_batch(device, ts.off_policy_runner, ts.actor_batch, ts.rng);
+                gather_dual_batch(device, ts.off_policy_runner_offline, ts.off_policy_runner_online, ts.actor_batch, offline_buffer_share, ts.rng);
                 train_actor(device, ts.actor_critic, ts.actor_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.critic_buffers[0], ts.actor_training_buffers, ts.action_noise_actor, ts.rng);
             }
         }

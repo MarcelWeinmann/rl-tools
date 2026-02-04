@@ -24,6 +24,7 @@ namespace rl_tools::rl::algorithms::sac::loop::core{
         static constexpr TI N_WARMUP_STEPS_ACTOR = 100; // Number of steps before actor training starts
         static_assert(N_WARMUP_STEPS >= SAC_PARAMETERS::ACTOR_BATCH_SIZE);
         static constexpr TI STEP_LIMIT = 10000;
+        static constexpr TI N_PRETRAIN_STEPS = N_WARMUP_STEPS;
         static constexpr TI REPLAY_BUFFER_CAP = STEP_LIMIT; // Note: when inheriting from this class for overwriting the default STEP_LIMIT you need to set the REPLAY_BUFFER_CAP as well otherwise it will be the default step limit
         static constexpr TI EPISODE_STEP_LIMIT = ENVIRONMENT::EPISODE_STEP_LIMIT;
 
