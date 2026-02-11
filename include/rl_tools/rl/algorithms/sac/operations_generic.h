@@ -467,6 +467,31 @@ namespace rl_tools{
 //        utils::assert_exit(device, !is_nan(device, actor_critic.actor.content.weights_input.parameters), "actor nan");
     }
 
+    template <typename DEVICE, typename SPEC, typename BATCH_SPEC, typename OPTIMIZER, typename ACTOR_BUFFERS, typename TRAINING_BUFFERS_SPEC, typename RNG>
+    RL_TOOLS_FUNCTION_PLACEMENT void train_actor_imitation(DEVICE& device, rl::algorithms::sac::ActorCritic<SPEC>& actor_critic, rl::components::off_policy_runner::SequentialBatch<BATCH_SPEC>& batch, OPTIMIZER& optimizer, ACTOR_BUFFERS& actor_buffers, rl::algorithms::sac::ActorTrainingBuffers<TRAINING_BUFFERS_SPEC>& training_buffers, RNG& rng) {
+        using T = typename SPEC::TYPE_POLICY::DEFAULT;
+        using TI = typename DEVICE::index_t;
+        constexpr TI BATCH_SIZE = BATCH_SPEC::BATCH_SIZE;
+        zero_gradient(device, actor_critic.actor);
+        using SAMPLE_AND_SQUASH_MODE = nn::layers::sample_and_squash::mode::ExternalNoise<mode::Default<>>;
+        using RESET_MODE_SAS_SPEC = nn::layers::gru::ResetModeSpecification<TI, decltype(batch.reset)>;
+        using RESET_MODE_SAS = nn::layers::gru::ResetMode<SAMPLE_AND_SQUASH_MODE, RESET_MODE_SAS_SPEC>;
+        Mode<RESET_MODE_SAS> reset_mode_sas;
+        reset_mode_sas.reset_container = batch.reset;
+       
+        // Use the actor's current policy to generate actions given the demonstration states, weight to 1 / BATCH_SIZE to average the loss across the batch
+        forward(device, actor_critic.actor, batch.observations_current, training_buffers.actions, actor_buffers, rng, reset_mode_sas);
+        set_all(device, training_buffers.loss_weight, (T)1.0 / BATCH_SIZE);
+
+        T loss = nn::loss_functions::mse::evaluate(device, training_buffers.actions, batch.actions_current, training_buffers.loss_weight);
+        add_scalar(device, device.logger, "actor_imitation_loss", loss, 50);
+
+        // Propagate the MSE gradient back through the network to the weights and Update Weights
+        nn::loss_functions::mse::gradient(device, training_buffers.actions, batch.actions_current, training_buffers.d_actor_output_squashing, training_buffers.loss_weight);
+        backward(device, actor_critic.actor, batch.observations_current, training_buffers.d_actor_output_squashing, actor_buffers, reset_mode_sas);
+        step(device, optimizer, actor_critic.actor);
+    }
+
     template <typename DEVICE, typename SPEC, typename OFF_POLICY_RUNNER_SPEC, typename BATCH_SPEC, typename ACTOR_BUFFERS_TYPE, typename CRITIC_BUFFERS_TYPE, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT typename SPEC::T actor_value(DEVICE& device, rl::algorithms::sac::ActorCritic<SPEC>& actor_critic, rl::components::off_policy_runner::SequentialBatch<BATCH_SPEC>& batch, ACTOR_BUFFERS_TYPE& actor_buffers, CRITIC_BUFFERS_TYPE& critic_buffers, rl::algorithms::sac::ActorTrainingBuffers<SPEC>& training_buffers, RNG& rng) {
         // todo: needs to be updated
