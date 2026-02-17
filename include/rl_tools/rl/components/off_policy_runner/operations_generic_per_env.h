@@ -77,7 +77,7 @@ namespace rl_tools::rl::components::off_policy_runner{
         auto& env = get(runner.envs, 0, env_i);
         auto& state = get(runner.states, 0, env_i);
         auto& parameters = get(runner.env_parameters, 0, env_i);
-        typename ENVIRONMENT::State next_state;
+        auto& next_state = get(runner.next_states, 0, env_i);
 
         auto action = row(device, runner.buffers.actions, env_i);
 
@@ -105,6 +105,8 @@ namespace rl_tools::rl::components::off_policy_runner{
 
         // state progression needs to come after the addition to the replay buffer because "observation" can point to the memory of runner_state.state (in the case of REQUIRES_OBSERVATION=false)
         state = next_state;
+        observation = next_observation;
+        observation_privileged = next_observation_privileged;
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
