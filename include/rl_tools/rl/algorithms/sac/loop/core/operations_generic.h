@@ -123,9 +123,7 @@ namespace rl_tools{
             step<1>(device, ts.off_policy_runner_online, get_actor(ts), ts.actor_buffers_eval, ts.rng);
         }
         else{
-            typename CONFIG::EXPLORATION_POLICY exploration_policy;
-            typename CONFIG::EXPLORATION_POLICY::template Buffer<> exploration_policy_buffer;
-            step<0>(device, ts.off_policy_runner_offline, exploration_policy, exploration_policy_buffer, ts.rng);
+            step<1>(device, ts.off_policy_runner_offline, get_actor(ts), ts.actor_buffers_eval, ts.rng);
         }
         bool train_critic_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC && ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0;
         bool update_critic_targets_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC && ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TARGET_UPDATE_INTERVAL == 0;
@@ -158,7 +156,6 @@ namespace rl_tools{
             }
         }
         if(train_actor_imitation_flag){
-            randn(device, ts.action_noise_actor, ts.rng);
             gather_batch(device, ts.off_policy_runner_offline, ts.critic_batch, ts.rng);
             train_actor_imitation(device, ts.actor_critic, ts.critic_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.actor_training_buffers, ts.rng);
         }
