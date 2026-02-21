@@ -40,6 +40,7 @@ namespace rl_tools::rl::algorithms::sac::loop::core{
 
         static constexpr bool SHARED_BATCH = true;
         static constexpr bool SAMPLE_ENVIRONMENT_PARAMETERS = true;
+        static constexpr bool IMITAION_LEARNING = false;
 
         using BATCH_SAMPLING_PARAMETERS = rl::components::off_policy_runner::SequentialBatchParameters<TYPE_POLICY, TI, SAC_PARAMETERS::SEQUENCE_LENGTH, rl::components::off_policy_runner::SequentialBatchParametersDefault>;
 

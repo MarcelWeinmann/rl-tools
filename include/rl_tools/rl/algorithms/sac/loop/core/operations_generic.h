@@ -128,7 +128,6 @@ namespace rl_tools{
         bool train_critic_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC && ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0;
         bool update_critic_targets_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC && ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::CRITIC_TARGET_UPDATE_INTERVAL == 0;
         bool train_actor_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_ACTOR && ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::ACTOR_TRAINING_INTERVAL == 0;
-        bool train_actor_imitation_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_ACTOR && ts.step < CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::ACTOR_TRAINING_INTERVAL == 0;
         if(CONFIG::CORE_PARAMETERS::SHARED_BATCH && (train_critic_flag || train_actor_flag)){
             gather_dual_batch(device, ts.off_policy_runner_offline, ts.off_policy_runner_online, ts.critic_batch, offline_buffer_share, ts.rng);
             randn(device, ts.action_noise_critic, ts.rng);
@@ -155,9 +154,12 @@ namespace rl_tools{
                 train_actor(device, ts.actor_critic, ts.actor_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.critic_buffers[0], ts.actor_training_buffers, ts.action_noise_actor, ts.rng);
             }
         }
-        if(train_actor_imitation_flag){
-            gather_batch(device, ts.off_policy_runner_offline, ts.critic_batch, ts.rng);
-            train_actor_imitation(device, ts.actor_critic, ts.critic_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.actor_training_buffers, ts.rng);
+        if constexpr(CONFIG::CORE_PARAMETERS::IMITAION_LEARNING){
+            bool train_actor_imitation_flag = ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_ACTOR && ts.step < CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS && ts.step % CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::ACTOR_TRAINING_INTERVAL == 0;
+            if(train_actor_imitation_flag){
+                gather_batch(device, ts.off_policy_runner_offline, ts.critic_batch, ts.rng);
+                train_actor_imitation(device, ts.actor_critic, ts.critic_batch, ts.actor_critic.actor_optimizer, ts.actor_buffers[0], ts.actor_training_buffers, ts.rng);
+            }
         }
         ts.step++;
         return false;
