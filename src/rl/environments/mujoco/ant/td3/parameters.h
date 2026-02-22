@@ -56,6 +56,8 @@ namespace parameters_0{
 
         struct OFF_POLICY_RUNNER_PARAMETERS: rlt::rl::components::off_policy_runner::ParametersDefault<T, TI>{
             static constexpr TI N_ENVIRONMENTS = 1;
+            static constexpr TI N_STEP_RETURNS = 1;
+            static constexpr T GAMMA = 0.99;
             static constexpr TI REPLAY_BUFFER_CAPACITY = 1000000;
             static constexpr TI EPISODE_STEP_LIMIT = 1000;
             static constexpr bool COLLECT_EPISODE_STATS = true;

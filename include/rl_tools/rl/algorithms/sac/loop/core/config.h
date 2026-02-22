@@ -27,6 +27,7 @@ namespace rl_tools::rl::algorithms::sac::loop::core{
         static constexpr TI N_PRETRAIN_STEPS = N_WARMUP_STEPS;
         static constexpr TI REPLAY_BUFFER_CAP = STEP_LIMIT; // Note: when inheriting from this class for overwriting the default STEP_LIMIT you need to set the REPLAY_BUFFER_CAP as well otherwise it will be the default step limit
         static constexpr TI EPISODE_STEP_LIMIT = ENVIRONMENT::EPISODE_STEP_LIMIT;
+        static constexpr TI N_STEP_RETURNS = 1;
 
         static constexpr TI ACTOR_HIDDEN_DIM = 64;
         static constexpr TI ACTOR_NUM_LAYERS = 3;
@@ -55,6 +56,7 @@ namespace rl_tools::rl::algorithms::sac::loop::core{
     template<typename T_TYPE_POLICY, typename T_TI, typename T_RNG, typename T_ENVIRONMENT, typename T_PARAMETERS = DefaultParameters<T_TYPE_POLICY, T_TI, T_ENVIRONMENT>, template<typename, typename, typename, typename, bool> class APPROXIMATOR_CONFIG=ConfigApproximatorsMLP, bool T_DYNAMIC_ALLOCATION=true>
     struct Config{
         using TYPE_POLICY = T_TYPE_POLICY;
+        using T = typename TYPE_POLICY::DEFAULT;
         using TI = T_TI;
         using RNG = T_RNG;
         using ENVIRONMENT = T_ENVIRONMENT;
@@ -79,6 +81,8 @@ namespace rl_tools::rl::algorithms::sac::loop::core{
 
         struct OFF_POLICY_RUNNER_PARAMETERS{
             static constexpr TI N_ENVIRONMENTS = CORE_PARAMETERS::N_ENVIRONMENTS;
+            static constexpr TI N_STEP_RETURNS = CORE_PARAMETERS::N_STEP_RETURNS;
+            static constexpr T GAMMA = CORE_PARAMETERS::SAC_PARAMETERS::GAMMA_BASE;
             static constexpr bool ASYMMETRIC_OBSERVATIONS = !rl_tools::utils::typing::is_same_v<typename ENVIRONMENT::Observation, typename ENVIRONMENT::ObservationPrivileged>;
             static constexpr TI REPLAY_BUFFER_CAPACITY = CORE_PARAMETERS::REPLAY_BUFFER_CAP;
             static constexpr TI EPISODE_STEP_LIMIT = CORE_PARAMETERS::EPISODE_STEP_LIMIT;

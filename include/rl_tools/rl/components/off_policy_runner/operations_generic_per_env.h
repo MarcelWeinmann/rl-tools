@@ -69,21 +69,32 @@ namespace rl_tools::rl::components::off_policy_runner{
         using T = typename SPEC::TYPE_POLICY::DEFAULT;
         using TI = typename SPEC::TI;
         using ENVIRONMENT = typename SPEC::ENVIRONMENT;
-        auto observation                 = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM           >(device, runner.buffers.observations           , env_i, 0);
+        auto observation                 = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM>(   device, runner.buffers.observations           , env_i, 0);
         auto observation_privileged      = view<DEVICE, typename decltype(runner.buffers.observations_privileged)::SPEC, 1, SPEC::OBSERVATION_DIM_PRIVILEGED>(device, runner.buffers.observations_privileged, env_i, 0);
-        auto next_observation            = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM           >(device, runner.buffers.next_observations           , env_i, 0);
+        auto next_observation            = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM>(   device, runner.buffers.next_observations           , env_i, 0);
         auto next_observation_privileged = view<DEVICE, typename decltype(runner.buffers.observations_privileged)::SPEC, 1, SPEC::OBSERVATION_DIM_PRIVILEGED>(device, runner.buffers.next_observations_privileged, env_i, 0);
-//        auto action_raw = view<DEVICE, typename decltype(runner.buffers.actions)::SPEC, 1, ENVIRONMENT::ACTION_DIM>(device, runner.buffers.actions, env_i, 0);
         auto& env = get(runner.envs, 0, env_i);
-        auto& state = get(runner.states, 0, env_i);
         auto& parameters = get(runner.env_parameters, 0, env_i);
-        auto& next_state = get(runner.next_states, 0, env_i);
 
+        // get and observe the N_STEP state and create the observations
+        auto& state = get(runner.states, SPEC::PARAMETERS::N_STEP_RETURNS, env_i);
+        observe(device, env, parameters, state, typename ENVIRONMENT::Observation{}, observation, rng);
+        if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS) {
+            observe(device, env, parameters, state, typename ENVIRONMENT::ObservationPrivileged{}, observation_privileged, rng);
+        }
+
+        // step environment
+        auto& next_state = get(runner.states, 0, env_i);
         auto action = row(device, runner.buffers.actions, env_i);
-
         step(device, env, parameters, state, action, next_state, rng);
 
+        // calculate the N_STEP reward
         T reward_value = reward(device, env, parameters, state, action, next_state, rng);
+        for (size_t i = 1; i < SPEC::PARAMETERS::N_STEP_RETURNS; i++) {
+            auto& n_step_state = get(runner.states, i - 1, env_i);
+            T multiplier = std::pow(SPEC::PARAMETERS::GAMMA, i);
+            reward_value += multiplier * reward(device, env, parameters, state, action, n_step_state, rng);
+        }
 
 #if !defined(__CUDA_ARCH__) // this is a hack but convenient right now, would be good to add a "null-dispatch" for cuda or even better: add a device logger in cuda
         log_reward(device, env, parameters, state, action, next_state, rng, 331);
@@ -101,10 +112,12 @@ namespace rl_tools::rl::components::off_policy_runner{
         bool truncated = terminated_flag || episode_step_i == SPEC::PARAMETERS::EPISODE_STEP_LIMIT;
         set(runner.truncated, 0, env_i, truncated);
         auto& replay_buffer = get(runner.replay_buffers, 0, env_i);
-        add(device, replay_buffer, state, observation, observation_privileged, action, reward_value, next_state, next_observation, next_observation_privileged, terminated_flag, truncated);
+        if (episode_step_i >= SPEC::PARAMETERS::N_STEP_RETURNS)
+            add(device, replay_buffer, state, observation, observation_privileged, action, reward_value, next_state, next_observation, next_observation_privileged, terminated_flag, truncated);
 
         // state progression needs to come after the addition to the replay buffer because "observation" can point to the memory of runner_state.state (in the case of REQUIRES_OBSERVATION=false)
-        state = next_state;
+        for (size_t i = 0; i < SPEC::PARAMETERS::N_STEP_RETURNS; i++)
+            set(runner.states, i + 1, env_i, get(runner.states, i, env_i));
         observation = next_observation;
         observation_privileged = next_observation_privileged;
     }

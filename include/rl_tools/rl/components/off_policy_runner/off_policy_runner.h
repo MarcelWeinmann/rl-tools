@@ -198,6 +198,7 @@ namespace rl_tools::rl::components{
         using REPLAY_BUFFER_WITH_STATES_SPEC = replay_buffer::SpecificationWithStates<ENVIRONMENT, REPLAY_BUFFER_SPEC>;
         using REPLAY_BUFFER_TYPE = ReplayBufferWithStates<REPLAY_BUFFER_WITH_STATES_SPEC>;
         static constexpr TI N_ENVIRONMENTS = SPEC::PARAMETERS::N_ENVIRONMENTS;
+        static constexpr TI N_STEP_RETURNS = SPEC::PARAMETERS::N_STEP_RETURNS;
 
         off_policy_runner::Buffers<SPEC> buffers;
 
@@ -210,8 +211,7 @@ namespace rl_tools::rl::components{
         Matrix<matrix::Specification<off_policy_runner::EpisodeStats<off_policy_runner::EpisodeStatsSpecification<T, TI, SPEC::PARAMETERS::EPISODE_STATS_BUFFER_SIZE, SPEC::DYNAMIC_ALLOCATION_EPISODE_STATS>>, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> episode_stats;
         Matrix<matrix::Specification<REPLAY_BUFFER_TYPE, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> replay_buffers = {};
 
-        Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::State, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> next_states;
-        Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::State, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> states;
+        Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::State, TI, N_STEP_RETURNS + 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> states; // [next_states, states, states_t-1, ..., states_t-N-1]
         Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::Parameters, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> env_parameters;
         Matrix<matrix::Specification<T, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> episode_return;
         Matrix<matrix::Specification<TI, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> episode_step;

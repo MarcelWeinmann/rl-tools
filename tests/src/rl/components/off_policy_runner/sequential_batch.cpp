@@ -19,6 +19,8 @@ using EXPLORATION_POLICY = rlt::nn_models::RandomUniform<EXPLORATION_POLICY_SPEC
 using POLICIES = rl_tools::utils::Tuple<TI, EXPLORATION_POLICY>;
 struct OFF_POLICY_RUNNER_PARAMETERS{
     static constexpr TI N_ENVIRONMENTS = 2;
+    static constexpr TI N_STEP_RETURNS = 1;
+    static constexpr T GAMMA = 0.99;
     static constexpr bool ASYMMETRIC_OBSERVATIONS = !rl_tools::utils::typing::is_same_v<typename ENVIRONMENT::Observation, typename ENVIRONMENT::ObservationPrivileged>;
     static constexpr TI REPLAY_BUFFER_CAPACITY = 1000;
     static constexpr TI EPISODE_STEP_LIMIT = ENVIRONMENT::EPISODE_STEP_LIMIT;

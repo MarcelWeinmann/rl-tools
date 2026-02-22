@@ -126,6 +126,8 @@ TEST(RL_TOOLS_RL_ALGORITHMS_TD3_MLP_SECOND_STAGE, TEST_LOADING_TRAINED_ACTOR) {
 using TI = AC_DEVICE::index_t;
 struct OFF_POLICY_RUNNER_PARAMETERS{
     static constexpr TI N_ENVIRONMENTS = 1;
+    static constexpr TI N_STEP_RETURNS = 1;
+    static constexpr T GAMMA = 0.99;
     static constexpr bool ASYMMETRIC_OBSERVATIONS = false;
     static constexpr TI REPLAY_BUFFER_CAPACITY = 1000;
     static constexpr bool STOCHASTIC_POLICY = false;

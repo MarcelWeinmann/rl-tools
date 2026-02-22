@@ -335,6 +335,8 @@ namespace first_stage_second_stage{
 }
 template <typename TYPE_POLICY, typename TI>
 struct OFF_POLICY_RUNNER_PARAMETERS: rlt::rl::components::off_policy_runner::ParametersDefault<TYPE_POLICY, TI>{
+    static constexpr TI N_STEP_RETURNS = 1;
+    static constexpr T GAMMA = 0.99;
     static constexpr TI REPLAY_BUFFER_CAPACITY = 32;
     static constexpr TI EPISODE_STEP_LIMIT = 100;
     static constexpr bool STOCHASTIC_POLICY = true;

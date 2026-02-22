@@ -9,6 +9,7 @@ namespace rl_tools::rl::algorithms::td3 {
     template<typename TYPE_POLICY, typename TI>
     struct DefaultParameters {
         using T = typename TYPE_POLICY::DEFAULT;
+        static constexpr T GAMMA_BASE = 0.99;
         static constexpr T GAMMA = 0.99;
         static constexpr TI ACTOR_BATCH_SIZE = 100;
         static constexpr TI CRITIC_BATCH_SIZE = 100;

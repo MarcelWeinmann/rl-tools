@@ -10,6 +10,7 @@ namespace rl_tools::rl::algorithms::sac {
     template<typename TYPE_POLICY, typename TI, TI ACTION_DIM=1>
     struct DefaultParameters {
         using T = typename TYPE_POLICY::DEFAULT;
+        static constexpr T GAMMA_BASE = 0.99;
         static constexpr T GAMMA = 0.99;
         static constexpr TI ACTOR_BATCH_SIZE = 32;
         static constexpr TI CRITIC_BATCH_SIZE = 32;

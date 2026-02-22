@@ -48,7 +48,6 @@ namespace rl_tools{
         malloc(device, runner.buffers);
         malloc(device, runner.envs);
         malloc(device, runner.states);
-        malloc(device, runner.next_states);
         malloc(device, runner.env_parameters);
         malloc(device, runner.episode_return);
         malloc(device, runner.episode_step);
@@ -135,7 +134,6 @@ namespace rl_tools{
         free(device, runner.buffers);
         free(device, runner.envs);
         free(device, runner.states);
-        free(device, runner.next_states);
         free(device, runner.env_parameters);
         free(device, runner.episode_return);
         free(device, runner.episode_step);
