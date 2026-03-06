@@ -48,7 +48,14 @@ namespace rl_tools{
     constexpr auto& get_actor(const rl::algorithms::ppo::loop::core::State<T_CONFIG>& ts){
         return ts.ppo.actor;
     }
-
+    template <typename T_CONFIG>
+    constexpr auto& get_critic_1(const rl::algorithms::ppo::loop::core::State<T_CONFIG>& ts){
+        return ts.ppo.critic;
+    }
+    template <typename T_CONFIG>
+    constexpr auto& get_critic_2(const rl::algorithms::ppo::loop::core::State<T_CONFIG>& ts){
+        return ts.ppo.critic;
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 #endif

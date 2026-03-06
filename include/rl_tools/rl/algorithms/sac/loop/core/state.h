@@ -47,7 +47,14 @@ namespace rl_tools{
     constexpr auto& get_actor(rl::algorithms::sac::loop::core::State<T_CONFIG>& ts){
         return ts.actor_critic.actor;
     }
-
+    template <typename T_CONFIG>
+    constexpr auto& get_critic_1(rl::algorithms::sac::loop::core::State<T_CONFIG>& ts){
+        return ts.actor_critic.critics_target[0];
+    }
+    template <typename T_CONFIG>
+    constexpr auto& get_critic_2(rl::algorithms::sac::loop::core::State<T_CONFIG>& ts){
+        return ts.actor_critic.critics_target[1];
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 #endif

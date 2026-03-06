@@ -111,25 +111,36 @@ namespace rl_tools{
             }
 
         }
-        template <bool DYNAMIC_ALLOCATION, typename ENVIRONMENT, typename CHECKPOINT_PARAMETERS, typename DEVICE, typename ACTOR, typename RNG>
-        void save(DEVICE& device, const std::string step_folder, ACTOR& actor, RNG& rng){
+        template <bool DYNAMIC_ALLOCATION, typename ENVIRONMENT, typename CHECKPOINT_PARAMETERS, typename DEVICE, typename ACTOR, typename CRITIC, typename RNG>
+        void save(DEVICE& device, const std::string step_folder, ACTOR& actor, CRITIC& critic_1, CRITIC& critic_2, RNG& rng){
             using TI = typename DEVICE::index_t;
             static constexpr TI BATCH_SIZE = CHECKPOINT_PARAMETERS::TEST_INPUT_BATCH_SIZE;
             using INPUT_SHAPE = tensor::Replace<typename ACTOR::INPUT_SHAPE, BATCH_SIZE, 1>;
             using EVALUATION_ACTOR_TYPE_BATCH_SIZE = typename ACTOR::template CHANGE_BATCH_SIZE<TI, BATCH_SIZE>;
             using EVALUATION_ACTOR_TYPE = typename EVALUATION_ACTOR_TYPE_BATCH_SIZE::template CHANGE_CAPABILITY<nn::capability::Forward<DYNAMIC_ALLOCATION>>;
+            using EVALUATION_CRITIC_TYPE = typename CRITIC::template CHANGE_CAPABILITY<nn::capability::Forward<DYNAMIC_ALLOCATION>>;
             EVALUATION_ACTOR_TYPE evaluation_actor;
+            EVALUATION_CRITIC_TYPE evaluation_critic_1;
+            EVALUATION_CRITIC_TYPE evaluation_critic_2;
             malloc(device, evaluation_actor);
             copy(device, device, actor, evaluation_actor);
+            malloc(device, evaluation_critic_1);
+            copy(device, device, critic_1, evaluation_critic_1);
+            malloc(device, evaluation_critic_2);
+            copy(device, device, critic_2, evaluation_critic_2);
 #if defined(RL_TOOLS_ENABLE_HDF5) && !defined(RL_TOOLS_DISABLE_HDF5)
             std::filesystem::path checkpoint_path = std::filesystem::path(step_folder) / "checkpoint.h5";
             auto root_group = HighFive::File(checkpoint_path.string(), HighFive::File::Overwrite);
             auto actor_group = create_group(device, root_group, "actor");
+            auto critic_1_group = create_group(device, root_group, "critic_1");
+            auto critic_2_group = create_group(device, root_group, "critic_2");
 #else
             std::filesystem::path checkpoint_path = std::filesystem::path(step_folder) / "checkpoint.tar";
             persist::backends::tar::Writer writer;
             persist::backends::tar::WriterGroup<persist::backends::tar::WriterGroupSpecification<TI, decltype(writer)>> root_group{"", &writer};
             auto actor_group = create_group(device, root_group, "actor");
+            auto critic_1_group = create_group(device, root_group, "critic_1");
+            auto critic_2_group = create_group(device, root_group, "critic_2");
 #endif
             try{
                 std::cerr << "Checkpointing to: " << checkpoint_path << std::endl;
@@ -139,6 +150,8 @@ namespace rl_tools{
                 std::string meta = "{\"environment\": " + env_description + "}";
                 set_attribute(device, actor_group, "meta", meta.c_str());
                 rl_tools::save(device, evaluation_actor, actor_group);
+                rl_tools::save(device, evaluation_critic_1, critic_1_group);
+                rl_tools::save(device, evaluation_critic_2, critic_2_group);
                 {
                     using T = typename EVALUATION_ACTOR_TYPE::TYPE_POLICY::DEFAULT;
                     Tensor<tensor::Specification<T, TI, typename EVALUATION_ACTOR_TYPE::INPUT_SHAPE, DYNAMIC_ALLOCATION>> input;
@@ -186,7 +199,9 @@ namespace rl_tools{
             ts.checkpoint_this_step = false;
             auto step_folder = get_step_folder(device, ts.extrack_config, ts.extrack_paths, ts.step);
             auto& actor = get_actor(ts);
-            rl::loop::steps::checkpoint::save<CONFIG::DYNAMIC_ALLOCATION, typename CONFIG::ENVIRONMENT, typename CONFIG::CHECKPOINT_PARAMETERS>(device, step_folder.string(), actor, ts.rng_checkpoint);
+            auto& critic_1 = get_critic_1(ts);
+            auto& critic_2 = get_critic_2(ts);
+            rl::loop::steps::checkpoint::save<CONFIG::DYNAMIC_ALLOCATION, typename CONFIG::ENVIRONMENT, typename CONFIG::CHECKPOINT_PARAMETERS>(device, step_folder.string(), actor, critic_1, critic_2, ts.rng_checkpoint);
         }
         bool finished = step(device, static_cast<typename STATE::NEXT&>(ts));
         return finished;
