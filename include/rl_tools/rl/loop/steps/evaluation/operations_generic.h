@@ -53,7 +53,7 @@ namespace rl_tools{
 
 
     template <typename DEVICE, typename CONFIG>
-    RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::loop::steps::evaluation::State<CONFIG>& ts){
+    RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::loop::steps::evaluation::State<CONFIG>& ts, bool write_persistent=false){
         using TS = rl::loop::steps::evaluation::State<CONFIG>;
         using TI = typename CONFIG::TI;
         using PARAMETERS = typename CONFIG::EVALUATION_PARAMETERS;
@@ -90,7 +90,7 @@ namespace rl_tools{
                 }
             }
         }
-        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts));
+        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts), write_persistent);
         return finished;
     }
     template <typename DEVICE, typename PARAMETERS, typename utils::typing::enable_if<utils::typing::is_same_v<typename PARAMETERS::TAG, rl::loop::steps::evaluation::ParametersTag>>::type* = nullptr>

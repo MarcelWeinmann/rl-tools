@@ -77,7 +77,7 @@ namespace rl_tools{
 
 
     template <typename DEVICE, typename T_CONFIG>
-    RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::algorithms::ppo::loop::core::State<T_CONFIG>& ts){
+    RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::algorithms::ppo::loop::core::State<T_CONFIG>& ts, bool write_persistent=false){
         using CONFIG = T_CONFIG;
         using TI = typename DEVICE::index_t;
         using OBS_SPEC = decltype(ts.on_policy_runner_dataset.observations);

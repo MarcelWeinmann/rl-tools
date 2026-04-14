@@ -111,7 +111,7 @@ namespace rl_tools{
 
 
     template <typename DEVICE, typename T_CONFIG>
-    RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::algorithms::sac::loop::core::State<T_CONFIG>& ts){
+    RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::algorithms::sac::loop::core::State<T_CONFIG>& ts, bool write_persistent=false){
         using CONFIG = T_CONFIG;
         using T = typename CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::T;
         T offline_buffer_share = ts.step >= CONFIG::CORE_PARAMETERS::N_PRETRAIN_STEPS ? 0.0 : CONFIG::CORE_PARAMETERS::SAC_PARAMETERS::OFFLINE_BUFFER_SHARE;
@@ -119,7 +119,7 @@ namespace rl_tools{
             return true;
         }
         set_step(device, device.logger, ts.step);
-        if(ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS){
+        if(!write_persistent && ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS){
             step<1>(device, ts.off_policy_runner_online, get_actor(ts), ts.actor_buffers_eval, ts.rng);
         }
         else{

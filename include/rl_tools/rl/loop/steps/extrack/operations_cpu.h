@@ -31,10 +31,10 @@ namespace rl_tools{
     }
 
     template <typename DEVICE, typename CONFIG>
-    bool step(DEVICE& device, rl::loop::steps::extrack::State<CONFIG>& ts){
+    bool step(DEVICE& device, rl::loop::steps::extrack::State<CONFIG>& ts, bool write_persistent=false){
         using TI = typename CONFIG::TI;
         using STATE = rl::loop::steps::extrack::State<CONFIG>;
-        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts));
+        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts), write_persistent);
         return finished;
     }
 }

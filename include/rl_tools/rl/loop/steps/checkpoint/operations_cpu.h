@@ -191,7 +191,7 @@ namespace rl_tools{
     }
 
     template <typename DEVICE, typename CONFIG>
-    bool step(DEVICE& device, rl::loop::steps::checkpoint::State<CONFIG>& ts){
+    bool step(DEVICE& device, rl::loop::steps::checkpoint::State<CONFIG>& ts, bool write_persistent=false){
         using TYPE_POLICY = typename CONFIG::TYPE_POLICY;
         using TI = typename CONFIG::TI;
         using STATE = rl::loop::steps::checkpoint::State<CONFIG>;
@@ -203,7 +203,7 @@ namespace rl_tools{
             auto& critic_2 = get_critic_2(ts);
             rl::loop::steps::checkpoint::save<CONFIG::DYNAMIC_ALLOCATION, typename CONFIG::ENVIRONMENT, typename CONFIG::CHECKPOINT_PARAMETERS>(device, step_folder.string(), actor, critic_1, critic_2, ts.rng_checkpoint);
         }
-        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts));
+        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts), write_persistent);
         return finished;
     }
 }

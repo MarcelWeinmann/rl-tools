@@ -23,11 +23,11 @@ namespace rl_tools{
     }
 
     template <typename DEVICE, typename CONFIG>
-    bool step(DEVICE& device, rl::loop::steps::timing::State<CONFIG>& ts){
+    bool step(DEVICE& device, rl::loop::steps::timing::State<CONFIG>& ts, bool write_persistent=false){
         using T = typename CONFIG::TYPE_POLICY::DEFAULT;
         using TI = typename CONFIG::TI;
         using STATE = rl::loop::steps::timing::State<CONFIG>;
-        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts));
+        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts), write_persistent);
         if(ts.step % CONFIG::PARAMETERS::INTERVAL == 0){
             auto now = std::chrono::steady_clock::now();
             if(now - ts.last_steps_per_second_time > std::chrono::seconds(10)){

@@ -121,7 +121,7 @@ namespace rl_tools{
     }
 
     template <typename DEVICE, typename CONFIG>
-    bool step(DEVICE& device, rl::loop::steps::save_trajectories::State<CONFIG>& ts){
+    bool step(DEVICE& device, rl::loop::steps::save_trajectories::State<CONFIG>& ts, bool write_persistent=false){
         using TS = rl::loop::steps::save_trajectories::State<CONFIG>;
         using TI = typename CONFIG::TI;
         using PARAMETERS = typename CONFIG::SAVE_TRAJECTORIES_PARAMETERS;
@@ -169,7 +169,7 @@ namespace rl_tools{
                 }
             }
         }
-        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts));
+        bool finished = step(device, static_cast<typename STATE::NEXT&>(ts), write_persistent);
         return finished;
     }
     // to log the configuration
