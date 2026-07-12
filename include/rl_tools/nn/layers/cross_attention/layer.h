@@ -85,7 +85,45 @@ namespace rl_tools::nn::layers::cross_attention {
     constexpr bool check_input_output = check_input_output_f<LAYER_SPEC, INPUT_SPEC, OUTPUT_SPEC>();
 
     struct State{};
-    struct Buffer{};
+    namespace buffers{
+        template <typename T_SPEC, bool T_DYNAMIC_ALLOCATION>
+        struct Specification{
+            using SPEC = T_SPEC;
+            static constexpr bool DYNAMIC_ALLOCATION = T_DYNAMIC_ALLOCATION;
+        };
+        // Batch-level intermediates of the attention forward pass, laid out gemm-friendly:
+        // tokens/k/v have one row per (batch row, token), attn/out_latents one row per (batch row, latent).
+        // Only used by the BLAS paths — the generic path works on stack-allocated per-row intermediates.
+        template <typename T_BUFFER_SPEC>
+        struct Evaluation{
+            using BUFFER_SPEC = T_BUFFER_SPEC;
+            using SPEC = typename BUFFER_SPEC::SPEC;
+            using CONFIG = typename SPEC::CONFIG;
+            using T = typename SPEC::TYPE_POLICY::DEFAULT;
+            using TI = typename SPEC::TI;
+            static constexpr TI BATCH_SIZE = SPEC::INTERNAL_BATCH_SIZE;
+            static constexpr bool DYNAMIC_ALLOCATION = BUFFER_SPEC::DYNAMIC_ALLOCATION;
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::N_TOKENS, CONFIG::TOKEN_DIM, DYNAMIC_ALLOCATION>> tokens;
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::N_TOKENS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> k, v;
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE, CONFIG::NUM_LATENTS * CONFIG::NUM_HEADS * CONFIG::N_TOKENS, DYNAMIC_ALLOCATION>> probs;
+            Matrix<matrix::Specification<T, TI, CONFIG::NUM_LATENTS, BATCH_SIZE * CONFIG::N_TOKENS, DYNAMIC_ALLOCATION>> logits; // per-head scratch, also holds d_logits in the backward pass
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> attn;
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> out_latents;
+        };
+        template <typename T_BUFFER_SPEC>
+        struct Backward: Evaluation<T_BUFFER_SPEC>{
+            using BUFFER_SPEC = T_BUFFER_SPEC;
+            using SPEC = typename BUFFER_SPEC::SPEC;
+            using CONFIG = typename SPEC::CONFIG;
+            using T = typename SPEC::TYPE_POLICY::DEFAULT;
+            using TI = typename SPEC::TI;
+            static constexpr TI BATCH_SIZE = SPEC::INTERNAL_BATCH_SIZE;
+            static constexpr bool DYNAMIC_ALLOCATION = BUFFER_SPEC::DYNAMIC_ALLOCATION;
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> d_out_latents, d_attn;
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::N_TOKENS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> d_k, d_v;
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::N_TOKENS, CONFIG::TOKEN_DIM, DYNAMIC_ALLOCATION>> d_tokens;
+        };
+    }
 
     template<typename T_SPEC>
     struct LayerForward {
@@ -123,12 +161,14 @@ namespace rl_tools::nn::layers::cross_attention {
         typename SPEC::PARAMETER_TYPE::template Instance<B_O_PARAMETER_SPEC> b_o;
 
         template<bool DYNAMIC_ALLOCATION=true>
-        using Buffer = cross_attention::Buffer;
+        using Buffer = cross_attention::buffers::Evaluation<cross_attention::buffers::Specification<SPEC, DYNAMIC_ALLOCATION>>;
         template<bool DYNAMIC_ALLOCATION=true>
         using State = cross_attention::State;
     };
     template<typename SPEC>
     struct LayerBackward: public LayerForward<SPEC>{
+        template<bool DYNAMIC_ALLOCATION=true>
+        using Buffer = cross_attention::buffers::Backward<cross_attention::buffers::Specification<SPEC, DYNAMIC_ALLOCATION>>;
         // Caches the token block of the input during forward so that backward_input
         // (which does not receive the input) can recompute the attention internals
         using PARENT = LayerForward<SPEC>;

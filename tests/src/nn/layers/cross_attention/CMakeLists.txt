@@ -1,0 +1,9 @@
+add_executable(test_nn_layers_cross_attention_blas cross_attention_blas.cpp)
+target_link_libraries(test_nn_layers_cross_attention_blas PRIVATE RLtools::RLtools GTest::gtest_main)
+gtest_discover_tests(test_nn_layers_cross_attention_blas)
+
+add_executable(benchmark_nn_layers_cross_attention_blas cross_attention_blas_benchmark.cpp)
+target_link_libraries(benchmark_nn_layers_cross_attention_blas PRIVATE RLtools::RLtools)
+if(NOT CMAKE_BUILD_TYPE MATCHES Debug)
+    target_compile_options(benchmark_nn_layers_cross_attention_blas PRIVATE -O3 -march=native)
+endif()
