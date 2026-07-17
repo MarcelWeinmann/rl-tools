@@ -1,0 +1,5 @@
+add_executable(test_rl_algorithms_qr_sac_quantile_huber quantile_huber.cpp)
+target_link_libraries(test_rl_algorithms_qr_sac_quantile_huber PRIVATE RLtools::RLtools RLtools::Test GTest::gtest_main)
+gtest_discover_tests(test_rl_algorithms_qr_sac_quantile_huber)
+
+add_subdirectory(cpu)
