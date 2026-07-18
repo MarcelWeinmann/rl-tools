@@ -57,9 +57,37 @@ namespace rl_tools{
         set(device, optimizer.second_order_moment_bias_correction, second_order_moment_bias_correction, 0);
         set(device, optimizer.age, age + 1, 0);
     }
+    // gradient_norm(...) returns the global L2 norm for models (nn_models::sequential applies the sqrt
+    // at the top level) but the squared sum for a bare parameter instance (parameter-level values are
+    // the summands of the model-level norm). These overloads unify both to the L2 norm for step().
+    template<typename DEVICE, typename MODEL>
+    RL_TOOLS_FUNCTION_PLACEMENT auto _gradient_l2_norm(DEVICE& device, MODEL& model){
+        return gradient_norm(device, model);
+    }
+    template<typename DEVICE, typename SPEC>
+    RL_TOOLS_FUNCTION_PLACEMENT auto _gradient_l2_norm(DEVICE& device, nn::parameters::Gradient::Instance<SPEC>& parameter){
+        return math::sqrt(device.math, gradient_norm(device, parameter));
+    }
+    template<typename DEVICE, typename SPEC>
+    RL_TOOLS_FUNCTION_PLACEMENT auto _gradient_l2_norm(DEVICE& device, nn::parameters::Adam::Instance<SPEC>& parameter){
+        return math::sqrt(device.math, gradient_norm(device, parameter));
+    }
     template<typename DEVICE, typename SPEC, typename MODEL>
     RL_TOOLS_FUNCTION_PLACEMENT void step(DEVICE& device, nn::optimizers::Adam<SPEC>& optimizer, MODEL& model) {
         _step(device, optimizer);
+        if constexpr(SPEC::DEFAULT_PARAMETERS::ENABLE_GRADIENT_NORM_CLIPPING){
+            using T = typename SPEC::T;
+            constexpr T CLIP_VALUE = SPEC::DEFAULT_PARAMETERS::GRADIENT_NORM_CLIP_VALUE;
+            T gradient_l2_norm = _gradient_l2_norm(device, model);
+            // norm - norm is NaN for NaN as well as +/-inf norms: non-finite gradients cannot be
+            // rescued by rescaling (inf * 0 = nan), so drop them before they reach the moments
+            if(math::is_nan(device.math, gradient_l2_norm - gradient_l2_norm)){
+                zero_gradient(device, model);
+            }
+            else if(gradient_l2_norm > CLIP_VALUE){
+                scale_gradient(device, model, CLIP_VALUE / gradient_l2_norm);
+            }
+        }
         update(device, model, optimizer);
     }
     template<typename SOURCE_DEVICE, typename TARGET_DEVICE, typename SOURCE_SPEC, typename TARGET_SPEC>

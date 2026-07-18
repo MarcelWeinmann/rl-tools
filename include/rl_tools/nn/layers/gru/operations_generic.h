@@ -921,6 +921,14 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT auto gradient_norm(DEVICE& device, const nn::layers::gru::LayerGradient<SPEC>& layer) {
         return gradient_norm(device, layer.weights_input) + gradient_norm(device, layer.weights_hidden) + gradient_norm(device, layer.biases_input) + gradient_norm(device, layer.biases_hidden) + gradient_norm(device, layer.initial_hidden_state);
     }
+    template<typename DEVICE, typename SPEC, typename T_FACTOR>
+    RL_TOOLS_FUNCTION_PLACEMENT void scale_gradient(DEVICE& device, nn::layers::gru::LayerGradient<SPEC>& layer, T_FACTOR factor) {
+        scale_gradient(device, layer.weights_input, factor);
+        scale_gradient(device, layer.weights_hidden, factor);
+        scale_gradient(device, layer.biases_input, factor);
+        scale_gradient(device, layer.biases_hidden, factor);
+        scale_gradient(device, layer.initial_hidden_state, factor);
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 

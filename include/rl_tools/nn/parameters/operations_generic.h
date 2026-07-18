@@ -85,6 +85,11 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT auto gradient_norm(DEVICE& device, const nn::parameters::Gradient::Instance<SPEC>& parameter){
         return squared_sum(device, parameter.gradient);
     }
+    template<typename DEVICE, typename SPEC, typename T_FACTOR>
+    RL_TOOLS_FUNCTION_PLACEMENT void scale_gradient(DEVICE& device, nn::parameters::Gradient::Instance<SPEC>& parameter, T_FACTOR factor){
+        using T_GRADIENT = typename decltype(parameter.gradient)::SPEC::T;
+        scale(device, parameter.gradient, (T_GRADIENT)factor);
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 #endif

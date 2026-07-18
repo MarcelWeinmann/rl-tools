@@ -554,6 +554,14 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT auto gradient_norm(DEVICE& device, const nn::layers::cross_attention::LayerGradient<SPEC>& layer) {
         return gradient_norm(device, layer.latents) + gradient_norm(device, layer.w_k) + gradient_norm(device, layer.w_v) + gradient_norm(device, layer.w_o) + gradient_norm(device, layer.b_o);
     }
+    template<typename DEVICE, typename SPEC, typename T_FACTOR>
+    RL_TOOLS_FUNCTION_PLACEMENT void scale_gradient(DEVICE& device, nn::layers::cross_attention::LayerGradient<SPEC>& layer, T_FACTOR factor) {
+        scale_gradient(device, layer.latents, factor);
+        scale_gradient(device, layer.w_k, factor);
+        scale_gradient(device, layer.w_v, factor);
+        scale_gradient(device, layer.w_o, factor);
+        scale_gradient(device, layer.b_o, factor);
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 

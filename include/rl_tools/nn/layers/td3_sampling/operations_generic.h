@@ -259,6 +259,8 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT auto gradient_norm(DEVICE& device, const nn::layers::td3_sampling::LayerGradient<SPEC>& layer) {
         return 0;
     }
+    template<typename DEVICE, typename SPEC, typename T_FACTOR>
+    RL_TOOLS_FUNCTION_PLACEMENT void scale_gradient(DEVICE& device, nn::layers::td3_sampling::LayerGradient<SPEC>& layer, T_FACTOR factor) { } // no trainable parameters
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 #endif

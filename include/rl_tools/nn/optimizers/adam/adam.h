@@ -39,6 +39,12 @@ namespace rl_tools::nn::optimizers{
             static constexpr T BIAS_LR_FACTOR = 1;
             static constexpr bool ENABLE_GRADIENT_CLIPPING = false;
             static constexpr T GRADIENT_CLIP_VALUE = 1;
+            // Global gradient norm clipping (like torch.nn.utils.clip_grad_norm_): if the L2 norm over
+            // ALL gradients of the model passed to step() exceeds GRADIENT_NORM_CLIP_VALUE, every gradient
+            // is scaled by GRADIENT_NORM_CLIP_VALUE / norm before the moment updates. This preserves the
+            // gradient direction, unlike the element-wise ENABLE_GRADIENT_CLIPPING clamp above.
+            static constexpr bool ENABLE_GRADIENT_NORM_CLIPPING = false;
+            static constexpr T GRADIENT_NORM_CLIP_VALUE = 1;
         };
         template <typename TYPE_POLICY>
         struct DEFAULT_PARAMETERS_PYTORCH: DEFAULT_PARAMETERS_TENSORFLOW<TYPE_POLICY>{

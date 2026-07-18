@@ -208,6 +208,10 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT auto gradient_norm(DEVICE& device, const nn::layers::embedding::LayerGradient<SPEC>& layer) {
         return gradient_norm(device, layer.weights);
     }
+    template<typename DEVICE, typename SPEC, typename T_FACTOR>
+    RL_TOOLS_FUNCTION_PLACEMENT void scale_gradient(DEVICE& device, nn::layers::embedding::LayerGradient<SPEC>& layer, T_FACTOR factor) {
+        scale_gradient(device, layer.weights, factor);
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 #endif
