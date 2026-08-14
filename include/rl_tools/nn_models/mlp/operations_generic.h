@@ -367,6 +367,15 @@ namespace rl_tools{
         return_value += gradient_norm(device, model.output_layer);
         return return_value;
     }
+    template<typename DEVICE, typename SPEC, typename T_FACTOR>
+    RL_TOOLS_FUNCTION_PLACEMENT void scale_gradient(DEVICE& device, nn_models::mlp::NeuralNetworkGradient<SPEC>& network, T_FACTOR factor){
+        using TI = typename DEVICE::index_t;
+        scale_gradient(device, network.input_layer, factor);
+        for(TI layer_i = 0; layer_i < SPEC::NUM_HIDDEN_LAYERS; layer_i++){
+            scale_gradient(device, network.hidden_layers[layer_i], factor);
+        }
+        scale_gradient(device, network.output_layer, factor);
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 

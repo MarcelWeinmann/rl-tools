@@ -500,6 +500,13 @@ namespace rl_tools{
         }
         return return_value;
     }
+    template<typename DEVICE, typename SPEC, typename T_FACTOR>
+    RL_TOOLS_FUNCTION_PLACEMENT void scale_gradient(DEVICE& device, nn_models::sequential::ModuleGradient<SPEC>& model, T_FACTOR factor){
+        scale_gradient(device, model.content, factor);
+        if constexpr(!utils::typing::is_same_v<typename SPEC::NEXT_MODULE, nn_models::sequential::OutputModule>) {
+            scale_gradient(device, model.next_module, factor);
+        }
+    }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 

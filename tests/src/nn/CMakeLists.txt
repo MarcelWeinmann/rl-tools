@@ -65,3 +65,7 @@ target_link_libraries(
         GTest::gtest_main
 )
 gtest_discover_tests(test_nn_mode)
+
+add_executable(test_nn_optimizers_adam_gradient_norm_clipping optimizers_adam_gradient_norm_clipping.cpp)
+target_link_libraries(test_nn_optimizers_adam_gradient_norm_clipping PRIVATE RLtools::RLtools GTest::gtest_main)
+gtest_discover_tests(test_nn_optimizers_adam_gradient_norm_clipping)
