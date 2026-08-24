@@ -441,10 +441,17 @@ namespace rl_tools
             }
         }
     }
+    // t1 is const: utils::polyak::update/update_squared declare their source as
+    // `const Tensor&`, and with a non-const parameter here this overload was not viable for them,
+    // so the call silently fell through to the generic host implementation in
+    // containers/tensor/operations_generic.h - which walks device pointers on the CPU and
+    // segfaults. That is what killed update_critic_targets on the very first target update.
+    // Accepting const is strictly more permissive: non-const arguments still bind, and the
+    // three argument form below only ever reads t1.
     template<typename DEV_SPEC, typename SPEC_1, typename OPERATION, typename SPEC_OUTPUT,
         typename std::enable_if<!devices::CUDA<DEV_SPEC>::TAG, int>::type = 0>
-    void binary_operation(devices::CUDA<DEV_SPEC>& device, const OPERATION& op, Tensor<SPEC_1>& t1, Tensor<SPEC_OUTPUT>& output){
-        binary_operation(device, op, t1, output, output);
+    void binary_operation(devices::CUDA<DEV_SPEC>& device, const OPERATION& op, const Tensor<SPEC_1>& t1, Tensor<SPEC_OUTPUT>& output){
+        binary_operation(device, op, const_cast<Tensor<SPEC_1>&>(t1), output, output);
     }
     namespace tensor::kernels {
         template<typename DEV_SPEC, typename SPEC_1, typename SPEC_2, typename SPEC_3, typename OPERATION, typename SPEC_OUTPUT>

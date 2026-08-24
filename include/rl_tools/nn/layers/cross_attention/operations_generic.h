@@ -103,6 +103,16 @@ namespace rl_tools{
                 set(output, row_i, CONFIG::TOKEN_OFFSET + CONFIG::ENCODING_DIM + feature_i, get(input, row_i, CONFIG::TOKEN_OFFSET + CONFIG::N_TOKENS * CONFIG::TOKEN_DIM + feature_i));
             }
         }
+        // Parameter gradients are summed over the rows of the batch. The generic path walks the
+        // rows sequentially so a plain increment is enough; the CUDA path runs one thread per
+        // row, so every row accumulates into the same weight element concurrently and needs an
+        // atomic. operations_cuda.h overloads this for devices::CUDA and is included before
+        // this file, so the overload is visible when row_backward is instantiated.
+        template <typename DEVICE, typename SPEC, typename... INDICES>
+        RL_TOOLS_FUNCTION_PLACEMENT void accumulate_gradient(DEVICE& device, Tensor<SPEC>& tensor, typename SPEC::T value, const INDICES... indices){
+            increment(device, tensor, value, indices...);
+        }
+
         // Backward pass for one row given the recomputed intermediates.
         // WITH_PARAM_GRADIENTS requires LAYER to be a (non-const) LayerGradient
         template <bool WITH_PARAM_GRADIENTS, bool WITH_D_INPUT, typename DEVICE, typename SPEC, typename LAYER, typename D_OUTPUT_SPEC, typename D_INPUT_SPEC>
@@ -125,11 +135,11 @@ namespace rl_tools{
                 for(TI dim_i = 0; dim_i < CONFIG::MODEL_DIM; dim_i++){
                     T d_out = get(d_output, row_i, CONFIG::TOKEN_OFFSET + latent_i * CONFIG::MODEL_DIM + dim_i);
                     if constexpr(WITH_PARAM_GRADIENTS){
-                        increment(device, layer.b_o.gradient, d_out, dim_i);
+                        accumulate_gradient(device, layer.b_o.gradient, d_out, dim_i);
                     }
                     for(TI model_i = 0; model_i < CONFIG::MODEL_DIM; model_i++){
                         if constexpr(WITH_PARAM_GRADIENTS){
-                            increment(device, layer.w_o.gradient, d_out * im.attn[latent_i][model_i], dim_i, model_i);
+                            accumulate_gradient(device, layer.w_o.gradient, d_out * im.attn[latent_i][model_i], dim_i, model_i);
                         }
                         d_attn[latent_i][model_i] += get(device, layer.w_o.parameters, dim_i, model_i) * d_out;
                     }
@@ -156,7 +166,7 @@ namespace rl_tools{
                         T d_logit = im.probs[latent_i][head_i][token_i] * (d_probs[token_i] - dot);
                         for(TI dim_i = 0; dim_i < CONFIG::HEAD_DIM; dim_i++){
                             if constexpr(WITH_PARAM_GRADIENTS){
-                                increment(device, layer.latents.gradient, d_logit * im.k[token_i][head_offset + dim_i] * inv_sqrt_head_dim, latent_i, head_offset + dim_i);
+                                accumulate_gradient(device, layer.latents.gradient, d_logit * im.k[token_i][head_offset + dim_i] * inv_sqrt_head_dim, latent_i, head_offset + dim_i);
                             }
                             d_k[token_i][head_offset + dim_i] += d_logit * get(device, layer.latents.parameters, latent_i, head_offset + dim_i) * inv_sqrt_head_dim;
                         }
@@ -168,8 +178,8 @@ namespace rl_tools{
                 for(TI dim_i = 0; dim_i < CONFIG::MODEL_DIM; dim_i++){
                     if constexpr(WITH_PARAM_GRADIENTS){
                         for(TI feature_i = 0; feature_i < CONFIG::TOKEN_DIM; feature_i++){
-                            increment(device, layer.w_k.gradient, d_k[token_i][dim_i] * im.tokens[token_i][feature_i], dim_i, feature_i);
-                            increment(device, layer.w_v.gradient, d_v[token_i][dim_i] * im.tokens[token_i][feature_i], dim_i, feature_i);
+                            accumulate_gradient(device, layer.w_k.gradient, d_k[token_i][dim_i] * im.tokens[token_i][feature_i], dim_i, feature_i);
+                            accumulate_gradient(device, layer.w_v.gradient, d_v[token_i][dim_i] * im.tokens[token_i][feature_i], dim_i, feature_i);
                         }
                     }
                 }

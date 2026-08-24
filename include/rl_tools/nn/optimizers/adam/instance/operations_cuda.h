@@ -43,13 +43,13 @@ namespace rl_tools {
                 }
                 if constexpr(utils::typing::is_same_v<typename PARAMETER_SPEC::CATEGORY_TAG, nn::parameters::categories::Weights>){
                     if constexpr(utils::typing::is_same_v<typename PARAMETER_SPEC::GROUP_TAG, nn::parameters::groups::Normal> && SPEC::ENABLE_WEIGHT_DECAY){
-                        parameter_update += get(parameter, row_i, col_i) * optimizer_parameters.weight_decay / 2;
+                        parameter_update += get(parameters, row_i, col_i) * optimizer_parameters.weight_decay / 2;
                     }
                     if constexpr(utils::typing::is_same_v<typename PARAMETER_SPEC::GROUP_TAG, nn::parameters::groups::Input> && SPEC::ENABLE_WEIGHT_DECAY){
-                        parameter_update += get(parameter, row_i, col_i) * optimizer_parameters.weight_decay_input / 2;
+                        parameter_update += get(parameters, row_i, col_i) * optimizer_parameters.weight_decay_input / 2;
                     }
                     if constexpr(utils::typing::is_same_v<typename PARAMETER_SPEC::GROUP_TAG, nn::parameters::groups::Output> && SPEC::ENABLE_WEIGHT_DECAY){
-                        parameter_update += get(parameter, row_i, col_i) * optimizer_parameters.weight_decay_output / 2;
+                        parameter_update += get(parameters, row_i, col_i) * optimizer_parameters.weight_decay_output / 2;
                     }
                 }
                 increment(parameters, row_i, col_i, (T_PARAMETER)-parameter_update);
