@@ -197,8 +197,14 @@ namespace rl_tools{
             target_action_values_per_sample(device, batch, training_buffers, next_action_log_probs, alpha, batch_step_i);
         }
     }
+    // reuse_target skips the Bellman target computation and uses whatever is already in
+    // training_buffers.target_action_value. The target depends only on the batch, the action noise,
+    // the actor and the two critic targets - none of which change between the two critics - so with
+    // SHARED_BATCH it is identical for critic 0 and critic 1 and computing it twice is pure waste
+    // (one actor evaluate plus two target critic evaluates per update pair). Nothing in that block
+    // consumes rng: the actor's sample_and_squash layer runs in ExternalNoise mode off action_noise.
     template <typename DEVICE, typename SPEC, typename CRITIC_TYPE, typename BATCH_SPEC, typename OPTIMIZER, typename ACTOR_BUFFERS, typename CRITIC_BUFFERS, typename CRITIC_TARGET_BUFFERS, typename TRAINING_BUFFER_SPEC, typename ACTION_NOISE_SPEC, typename RNG>
-    RL_TOOLS_FUNCTION_PLACEMENT void train_critic(DEVICE& device, rl::algorithms::qr_sac::ActorCritic<SPEC>& actor_critic, CRITIC_TYPE& critic, rl::components::off_policy_runner::SequentialBatch<BATCH_SPEC>& batch, OPTIMIZER& optimizer, ACTOR_BUFFERS& actor_target_buffers, CRITIC_BUFFERS& critic_buffers, CRITIC_TARGET_BUFFERS& critic_target_buffers, rl::algorithms::qr_sac::CriticTrainingBuffers<TRAINING_BUFFER_SPEC>& training_buffers, Matrix<ACTION_NOISE_SPEC>& action_noise, RNG& rng){
+    RL_TOOLS_FUNCTION_PLACEMENT void train_critic(DEVICE& device, rl::algorithms::qr_sac::ActorCritic<SPEC>& actor_critic, CRITIC_TYPE& critic, rl::components::off_policy_runner::SequentialBatch<BATCH_SPEC>& batch, OPTIMIZER& optimizer, ACTOR_BUFFERS& actor_target_buffers, CRITIC_BUFFERS& critic_buffers, CRITIC_TARGET_BUFFERS& critic_target_buffers, rl::algorithms::qr_sac::CriticTrainingBuffers<TRAINING_BUFFER_SPEC>& training_buffers, Matrix<ACTION_NOISE_SPEC>& action_noise, RNG& rng, bool reuse_target){
 #ifdef RL_TOOLS_ENABLE_TRACY
         ZoneScopedN("qr_sac::train_critic");
 #endif
@@ -217,6 +223,7 @@ namespace rl_tools{
 
         zero_gradient(device, critic);
 
+        if(!reuse_target){
         auto& sample_and_squash_layer = get_last_layer(actor_critic.actor);
         auto& sample_and_squash_buffer = get_last_buffer(actor_target_buffers);
         copy(device, device, action_noise, sample_and_squash_buffer.noise);
@@ -240,6 +247,7 @@ namespace rl_tools{
 
         auto last_buffer = get_last_buffer(actor_target_buffers);
         target_action_values(device, batch, training_buffers, last_buffer.log_probabilities, sample_and_squash_layer.log_alpha);
+        }
         using RESET_MODE_SPEC = nn::layers::gru::ResetModeSpecification<TI, decltype(batch.reset)>;
         using RESET_MODE = nn::layers::gru::ResetMode<mode::Default<>, RESET_MODE_SPEC>;
         Mode<RESET_MODE> reset_mode;
@@ -288,6 +296,12 @@ namespace rl_tools{
         }
         step(device, optimizer, critic);
     }
+    // backwards compatible overload: compute the target as before
+    template <typename DEVICE, typename SPEC, typename CRITIC_TYPE, typename BATCH_SPEC, typename OPTIMIZER, typename ACTOR_BUFFERS, typename CRITIC_BUFFERS, typename CRITIC_TARGET_BUFFERS, typename TRAINING_BUFFER_SPEC, typename ACTION_NOISE_SPEC, typename RNG>
+    RL_TOOLS_FUNCTION_PLACEMENT void train_critic(DEVICE& device, rl::algorithms::qr_sac::ActorCritic<SPEC>& actor_critic, CRITIC_TYPE& critic, rl::components::off_policy_runner::SequentialBatch<BATCH_SPEC>& batch, OPTIMIZER& optimizer, ACTOR_BUFFERS& actor_target_buffers, CRITIC_BUFFERS& critic_buffers, CRITIC_TARGET_BUFFERS& critic_target_buffers, rl::algorithms::qr_sac::CriticTrainingBuffers<TRAINING_BUFFER_SPEC>& training_buffers, Matrix<ACTION_NOISE_SPEC>& action_noise, RNG& rng){
+        train_critic(device, actor_critic, critic, batch, optimizer, actor_target_buffers, critic_buffers, critic_target_buffers, training_buffers, action_noise, rng, false);
+    }
+
     template <typename DEVICE, typename SPEC, typename TRAINING_BUFFERS_SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void min_value_d_output_per_sample(DEVICE& device, rl::algorithms::qr_sac::ActorCritic<SPEC>& actor_critic, rl::algorithms::qr_sac::ActorTrainingBuffers<TRAINING_BUFFERS_SPEC>& training_buffers, typename DEVICE::index_t batch_i) {
         auto critic_1_output = output(device, actor_critic.critics[0]);

@@ -129,19 +129,42 @@ namespace rl_tools{
                     set(d_input, row_i, CONFIG::TOKEN_OFFSET + CONFIG::N_TOKENS * CONFIG::TOKEN_DIM + feature_i, get(d_output, row_i, CONFIG::TOKEN_OFFSET + CONFIG::ENCODING_DIM + feature_i));
                 }
             }
+            // Every parameter gradient below is a sum over an inner index (the latents for b_o and
+            // w_o, the tokens for latents/w_k/w_v) that one row already holds in registers. Summing
+            // there first and accumulating once per gradient element, instead of once per
+            // (element, inner index), is the same arithmetic reassociated - and it cuts the
+            // read-modify-write traffic on the shared gradient tensors by 4-5x. That traffic, not
+            // the arithmetic, is what the CUDA backward was bound by: ~79k accumulations per row
+            // become ~19k.
+            //
             // gradient wrt the attention output (before the output projection)
             T d_attn[CONFIG::NUM_LATENTS][CONFIG::MODEL_DIM] = {};
+            if constexpr(WITH_PARAM_GRADIENTS){
+                for(TI dim_i = 0; dim_i < CONFIG::MODEL_DIM; dim_i++){
+                    // only NUM_LATENTS values are live at a time, so this stays in registers -
+                    // staging the whole [NUM_LATENTS][MODEL_DIM] block instead costs 2 kB of local
+                    // memory per thread and measurably slows every path through this function
+                    T d_l[CONFIG::NUM_LATENTS];
+                    T acc_b = 0;
+                    for(TI latent_i = 0; latent_i < CONFIG::NUM_LATENTS; latent_i++){
+                        d_l[latent_i] = get(d_output, row_i, CONFIG::TOKEN_OFFSET + latent_i * CONFIG::MODEL_DIM + dim_i);
+                        acc_b += d_l[latent_i];
+                    }
+                    accumulate_gradient(device, layer.b_o.gradient, acc_b, dim_i);
+                    for(TI model_i = 0; model_i < CONFIG::MODEL_DIM; model_i++){
+                        T acc_w = 0;
+                        for(TI latent_i = 0; latent_i < CONFIG::NUM_LATENTS; latent_i++){
+                            acc_w += d_l[latent_i] * im.attn[latent_i][model_i];
+                        }
+                        accumulate_gradient(device, layer.w_o.gradient, acc_w, dim_i, model_i);
+                    }
+                }
+            }
             for(TI latent_i = 0; latent_i < CONFIG::NUM_LATENTS; latent_i++){
                 for(TI dim_i = 0; dim_i < CONFIG::MODEL_DIM; dim_i++){
-                    T d_out = get(d_output, row_i, CONFIG::TOKEN_OFFSET + latent_i * CONFIG::MODEL_DIM + dim_i);
-                    if constexpr(WITH_PARAM_GRADIENTS){
-                        accumulate_gradient(device, layer.b_o.gradient, d_out, dim_i);
-                    }
+                    const T d = get(d_output, row_i, CONFIG::TOKEN_OFFSET + latent_i * CONFIG::MODEL_DIM + dim_i);
                     for(TI model_i = 0; model_i < CONFIG::MODEL_DIM; model_i++){
-                        if constexpr(WITH_PARAM_GRADIENTS){
-                            accumulate_gradient(device, layer.w_o.gradient, d_out * im.attn[latent_i][model_i], dim_i, model_i);
-                        }
-                        d_attn[latent_i][model_i] += get(device, layer.w_o.parameters, dim_i, model_i) * d_out;
+                        d_attn[latent_i][model_i] += get(device, layer.w_o.parameters, dim_i, model_i) * d;
                     }
                 }
             }
@@ -162,27 +185,55 @@ namespace rl_tools{
                         d_probs[token_i] = d_p;
                         dot += im.probs[latent_i][head_i][token_i] * d_p;
                     }
-                    for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
-                        T d_logit = im.probs[latent_i][head_i][token_i] * (d_probs[token_i] - dot);
+                    if constexpr(WITH_PARAM_GRADIENTS){
+                        // hoisting the token sum needs d_logit for all tokens at once; worth it
+                        // here because it removes 4 of every 5 accumulations into latents.gradient
+                        T d_logit[CONFIG::N_TOKENS];
+                        for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
+                            d_logit[token_i] = im.probs[latent_i][head_i][token_i] * (d_probs[token_i] - dot);
+                        }
                         for(TI dim_i = 0; dim_i < CONFIG::HEAD_DIM; dim_i++){
-                            if constexpr(WITH_PARAM_GRADIENTS){
-                                accumulate_gradient(device, layer.latents.gradient, d_logit * im.k[token_i][head_offset + dim_i] * inv_sqrt_head_dim, latent_i, head_offset + dim_i);
+                            T acc = 0;
+                            for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
+                                acc += d_logit[token_i] * im.k[token_i][head_offset + dim_i];
                             }
-                            d_k[token_i][head_offset + dim_i] += d_logit * get(device, layer.latents.parameters, latent_i, head_offset + dim_i) * inv_sqrt_head_dim;
+                            accumulate_gradient(device, layer.latents.gradient, acc * inv_sqrt_head_dim, latent_i, head_offset + dim_i);
+                        }
+                        for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
+                            for(TI dim_i = 0; dim_i < CONFIG::HEAD_DIM; dim_i++){
+                                d_k[token_i][head_offset + dim_i] += d_logit[token_i] * get(device, layer.latents.parameters, latent_i, head_offset + dim_i) * inv_sqrt_head_dim;
+                            }
+                        }
+                    }
+                    else{
+                        // backward_input has no gradient to accumulate, so keep d_logit a scalar:
+                        // measured, the array version costs this path ~75% (it is called twice per
+                        // actor update, on both critics)
+                        for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
+                            T d_logit = im.probs[latent_i][head_i][token_i] * (d_probs[token_i] - dot);
+                            for(TI dim_i = 0; dim_i < CONFIG::HEAD_DIM; dim_i++){
+                                d_k[token_i][head_offset + dim_i] += d_logit * get(device, layer.latents.parameters, latent_i, head_offset + dim_i) * inv_sqrt_head_dim;
+                            }
                         }
                     }
                 }
             }
             // projections: gradients wrt w_k/w_v and wrt the input tokens
-            for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
+            if constexpr(WITH_PARAM_GRADIENTS){
                 for(TI dim_i = 0; dim_i < CONFIG::MODEL_DIM; dim_i++){
-                    if constexpr(WITH_PARAM_GRADIENTS){
-                        for(TI feature_i = 0; feature_i < CONFIG::TOKEN_DIM; feature_i++){
-                            accumulate_gradient(device, layer.w_k.gradient, d_k[token_i][dim_i] * im.tokens[token_i][feature_i], dim_i, feature_i);
-                            accumulate_gradient(device, layer.w_v.gradient, d_v[token_i][dim_i] * im.tokens[token_i][feature_i], dim_i, feature_i);
+                    for(TI feature_i = 0; feature_i < CONFIG::TOKEN_DIM; feature_i++){
+                        T acc_k = 0, acc_v = 0;
+                        for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
+                            const T token = im.tokens[token_i][feature_i];
+                            acc_k += d_k[token_i][dim_i] * token;
+                            acc_v += d_v[token_i][dim_i] * token;
                         }
+                        accumulate_gradient(device, layer.w_k.gradient, acc_k, dim_i, feature_i);
+                        accumulate_gradient(device, layer.w_v.gradient, acc_v, dim_i, feature_i);
                     }
                 }
+            }
+            for(TI token_i = 0; token_i < CONFIG::N_TOKENS; token_i++){
                 if constexpr(WITH_D_INPUT){
                     for(TI feature_i = 0; feature_i < CONFIG::TOKEN_DIM; feature_i++){
                         T d_token = 0;

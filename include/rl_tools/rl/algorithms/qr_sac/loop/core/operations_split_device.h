@@ -77,12 +77,20 @@ namespace rl_tools{
         }
         if(train_critic_flag){
             for(int critic_i = 0; critic_i < 2; critic_i++){
+                bool reuse_target = false;
                 if constexpr(!HOST_PARAMETERS::SHARED_BATCH){
                     gather_dual_batch(host_device, host_ts.off_policy_runner_offline, host_ts.off_policy_runner_online, host_ts.critic_batch, offline_buffer_share, host_ts.rng);
                     copy(host_device, device, host_ts.critic_batch, ts.critic_batch);
                     randn(device, ts.action_noise_critic, ts.rng);
                 }
-                train_critic(device, ts.actor_critic, ts.actor_critic.critics[critic_i], ts.critic_batch, ts.actor_critic.critic_optimizers[critic_i], ts.actor_target_buffers[critic_i], ts.critic_buffers[critic_i], ts.critic_target_buffers[critic_i], ts.critic_training_buffers[critic_i], ts.action_noise_critic, ts.rng);
+                else{
+                    // see the note in operations_generic.h: the target is identical for both critics
+                    if(critic_i > 0){
+                        copy(device, device, ts.critic_training_buffers[0].target_action_value, ts.critic_training_buffers[critic_i].target_action_value);
+                        reuse_target = true;
+                    }
+                }
+                train_critic(device, ts.actor_critic, ts.actor_critic.critics[critic_i], ts.critic_batch, ts.actor_critic.critic_optimizers[critic_i], ts.actor_target_buffers[critic_i], ts.critic_buffers[critic_i], ts.critic_target_buffers[critic_i], ts.critic_training_buffers[critic_i], ts.action_noise_critic, ts.rng, reuse_target);
             }
         }
         if(update_critic_targets_flag){
