@@ -4,6 +4,10 @@
 #define RL_TOOLS_RL_ALGORITHMS_QR_SAC_LOOP_CORE_OPERATIONS_SPLIT_DEVICE_H
 
 #include "operations_generic.h"
+// the loop wrappers this file mirrors below (checkpoint pulls in the HDF5 writer; nvcc
+// compiles it fine, it just has to be included before this header is parsed)
+#include "../../../../loop/steps/extrack/operations_cpu.h"
+#include "../../../../loop/steps/checkpoint/operations_cpu.h"
 
 /*
     Split device variant of rl::algorithms::qr_sac::loop::core::step().
@@ -110,6 +114,40 @@ namespace rl_tools{
         host_ts.step++;
         ts.step = host_ts.step;
         return false;
+    }
+
+    // ---- the loop wrappers ----
+    //
+    // rl_tools' step() is a chain: checkpoint::step saves and then calls extrack::step, which calls
+    // the qr_sac core step. step_split_device only replaced the innermost link, so calling it with
+    // the core state (as the first version of CudaTrainer did) silently skipped the checkpoint
+    // layer and nothing was ever written to disk. These overloads reproduce the chain; pass the
+    // full loop state and overload resolution picks the outermost layer first, exactly as it does
+    // for step().
+
+    template <typename HOST_DEVICE, typename DEVICE, typename HOST_CONFIG, typename CONFIG>
+    bool step_split_device(HOST_DEVICE& host_device, rl::loop::steps::checkpoint::State<HOST_CONFIG>& host_ts, DEVICE& device, rl::algorithms::qr_sac::loop::core::State<CONFIG>& ts, bool write_persistent=false){
+        using STATE = rl::loop::steps::checkpoint::State<HOST_CONFIG>;
+        if(host_ts.step % HOST_CONFIG::CHECKPOINT_PARAMETERS::CHECKPOINT_INTERVAL == 0 || host_ts.checkpoint_this_step){
+            host_ts.checkpoint_this_step = false;
+            // The step loop only brings the actor back (that is all experience collection needs).
+            // What gets written here is the actor plus both critic targets, and those live only on
+            // the device, so sync the whole actor_critic first - otherwise the checkpoint would
+            // pair a trained actor with the critics from startup.
+            copy(device, host_device, ts.actor_critic, host_ts.actor_critic);
+            auto step_folder = get_step_folder(host_device, host_ts.extrack_config, host_ts.extrack_paths, host_ts.step);
+            auto& actor = get_actor(host_ts);
+            auto& critic_1 = get_critic_1(host_ts);
+            auto& critic_2 = get_critic_2(host_ts);
+            rl::loop::steps::checkpoint::save<HOST_CONFIG::DYNAMIC_ALLOCATION, typename HOST_CONFIG::ENVIRONMENT, typename HOST_CONFIG::CHECKPOINT_PARAMETERS>(host_device, step_folder.string(), actor, critic_1, critic_2, host_ts.rng_checkpoint);
+        }
+        return step_split_device(host_device, static_cast<typename STATE::NEXT&>(host_ts), device, ts, write_persistent);
+    }
+
+    template <typename HOST_DEVICE, typename DEVICE, typename HOST_CONFIG, typename CONFIG>
+    bool step_split_device(HOST_DEVICE& host_device, rl::loop::steps::extrack::State<HOST_CONFIG>& host_ts, DEVICE& device, rl::algorithms::qr_sac::loop::core::State<CONFIG>& ts, bool write_persistent=false){
+        using STATE = rl::loop::steps::extrack::State<HOST_CONFIG>;
+        return step_split_device(host_device, static_cast<typename STATE::NEXT&>(host_ts), device, ts, write_persistent);
     }
 
     // Push the host networks onto the accelerator once, before the first step, so both sides start
