@@ -150,7 +150,7 @@ namespace rl_tools{
         T reward = get(rewards_matrix_view, batch_step_i, 0);
         auto terminated_matrix_view = matrix_view(device, batch.terminated);
         bool terminated = get(terminated_matrix_view, batch_step_i, 0);
-        T entropy_bonus = -alpha * get(next_action_log_probs, 0, batch_step_i);
+        T entropy_bonus = -alpha * get(next_action_log_probs, 0, batch_step_i + TARGET_OFFSET); // log pi(a'|o_next): the actor ran over the target sequence, like the Q values above
         if constexpr(SPEC::PARAMETERS::ENTROPY_BONUS && SPEC::PARAMETERS::ENTROPY_BONUS_NEXT_STEP){
             min_next_state_action_value += entropy_bonus;
         }

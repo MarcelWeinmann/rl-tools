@@ -195,10 +195,14 @@ namespace rl_tools::rl::components{
         };
         using POLICY_STATES = rl_tools::utils::MapTuple<POLICIES, GET_STATE>;
         using REPLAY_BUFFER_SPEC = replay_buffer::Specification<TYPE_POLICY, typename SPEC::TI, SPEC::ENVIRONMENT::Observation::DIM, ENVIRONMENT::ObservationPrivileged::DIM, SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS, SPEC::ENVIRONMENT::ACTION_DIM, SPEC::PARAMETERS::REPLAY_BUFFER_CAPACITY, SPEC::DYNAMIC_ALLOCATION_REPLAY_BUFFER>;
-        using REPLAY_BUFFER_WITH_STATES_SPEC = replay_buffer::SpecificationWithStates<ENVIRONMENT, REPLAY_BUFFER_SPEC>;
-        using REPLAY_BUFFER_TYPE = ReplayBufferWithStates<REPLAY_BUFFER_WITH_STATES_SPEC>;
+        // No states in the replay buffer: an N-step transition starts N steps before the state the
+        // runner holds, and nothing reads them (recalculate_rewards would be wrong for N > 1 anyway).
+        // Two VehicleStates were 56% of a tam_sophy transition.
+        using REPLAY_BUFFER_TYPE = ReplayBuffer<REPLAY_BUFFER_SPEC>;
         static constexpr TI N_ENVIRONMENTS = SPEC::PARAMETERS::N_ENVIRONMENTS;
         static constexpr TI N_STEP_RETURNS = SPEC::PARAMETERS::N_STEP_RETURNS;
+        static_assert(N_STEP_RETURNS >= 1, "N_STEP_RETURNS must be at least 1");
+        using T_INPUT = typename SPEC::TYPE_POLICY::template GET<numeric_types::categories::Input>;
 
         off_policy_runner::Buffers<SPEC> buffers;
 
@@ -211,7 +215,20 @@ namespace rl_tools::rl::components{
         Matrix<matrix::Specification<off_policy_runner::EpisodeStats<off_policy_runner::EpisodeStatsSpecification<T, TI, SPEC::PARAMETERS::EPISODE_STATS_BUFFER_SIZE, SPEC::DYNAMIC_ALLOCATION_EPISODE_STATS>>, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> episode_stats;
         Matrix<matrix::Specification<REPLAY_BUFFER_TYPE, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> replay_buffers = {};
 
-        Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::State, TI, N_STEP_RETURNS + 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> states; // [next_states, states, states_t-1, ..., states_t-N-1]
+        // The environment is advanced outside the runner: before each step() the caller writes the
+        // current state s_k into row 0, and after it may overwrite buffers.actions - whatever is in
+        // there at the next step() is stored as the action applied from s_k. Row 1 is s_{k-1}.
+        Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::State, TI, 2, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> states; // [s_k, s_{k-1}]
+        // N-step window: a ring over the steps of the current episode, step m of env e lives in
+        // row e * N_STEP_RETURNS + m % N_STEP_RETURNS (column m % N_STEP_RETURNS for the rewards).
+        // It holds o_m, the action applied from s_m and the reward of that transition.
+        Matrix<matrix::Specification<T_INPUT, TI, N_ENVIRONMENTS * N_STEP_RETURNS, SPEC::ENVIRONMENT::Observation::DIM, SPEC::DYNAMIC_ALLOCATION>> n_step_observations;
+        using N_STEP_OBSERVATIONS_PRIVILEGED_STANDALONE = Matrix<matrix::Specification<T_INPUT, TI, N_ENVIRONMENTS * N_STEP_RETURNS, SPEC::OBSERVATION_DIM_PRIVILEGED, SPEC::DYNAMIC_ALLOCATION>>;
+        using N_STEP_OBSERVATIONS_PRIVILEGED_VIEW = typename decltype(n_step_observations)::template VIEW<>;
+        rl_tools::utils::typing::conditional_t<SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS, N_STEP_OBSERVATIONS_PRIVILEGED_STANDALONE, N_STEP_OBSERVATIONS_PRIVILEGED_VIEW> n_step_observations_privileged;
+        Matrix<matrix::Specification<T_INPUT, TI, N_ENVIRONMENTS * N_STEP_RETURNS, SPEC::ENVIRONMENT::ACTION_DIM, SPEC::DYNAMIC_ALLOCATION>> n_step_actions;
+        Matrix<matrix::Specification<T, TI, N_ENVIRONMENTS, N_STEP_RETURNS, SPEC::DYNAMIC_ALLOCATION>> n_step_rewards;
+        Matrix<matrix::Specification<TI, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> n_step_count; // steps of the current episode in the window so far
         Matrix<matrix::Specification<typename SPEC::ENVIRONMENT::Parameters, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> env_parameters;
         Matrix<matrix::Specification<T, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> episode_return;
         Matrix<matrix::Specification<TI, TI, 1, N_ENVIRONMENTS, SPEC::DYNAMIC_ALLOCATION>> episode_step;

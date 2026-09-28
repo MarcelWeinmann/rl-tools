@@ -86,6 +86,10 @@ namespace rl_tools::nn::layers::cross_attention {
 
     struct State{};
     namespace buffers{
+        // Rows of the batch handled by one thread block in the CUDA kernels (operations_cuda.h).
+        // Sizes the per-block partial sums of the parameter gradients below.
+        template <typename T>
+        constexpr int CUDA_ROWS_PER_BLOCK = sizeof(T) <= 4 ? 4 : 2;
         template <typename T_SPEC, bool T_DYNAMIC_ALLOCATION>
         struct Specification{
             using SPEC = T_SPEC;
@@ -109,6 +113,15 @@ namespace rl_tools::nn::layers::cross_attention {
             Matrix<matrix::Specification<T, TI, CONFIG::NUM_LATENTS, BATCH_SIZE * CONFIG::N_TOKENS, DYNAMIC_ALLOCATION>> logits; // per-head scratch, also holds d_logits in the backward pass
             Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> attn;
             Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> out_latents;
+            // Folded parameters, only used by the CUDA path. With TOKEN_DIM << MODEL_DIM the key
+            // projection folds into the latent queries and the value and output projections into
+            // one matrix (the queries are parameters, not activations):
+            //   fold_q[l*NUM_HEADS + h][f] = 1/sqrt(HEAD_DIM) * sum_{d in head h} latents[l][d] * w_k[d][f]
+            //   fold_m[e][h*TOKEN_DIM + f] = sum_{d in head h} w_o[e][d] * w_v[d][f]
+            // so logits = tokens @ fold_q^T and out = b_o + (probs @ tokens) @ fold_m^T.
+            static constexpr TI FOLD_DIM = CONFIG::NUM_HEADS * CONFIG::TOKEN_DIM;
+            Matrix<matrix::Specification<T, TI, CONFIG::NUM_LATENTS * CONFIG::NUM_HEADS, CONFIG::TOKEN_DIM, DYNAMIC_ALLOCATION>> fold_q;
+            Matrix<matrix::Specification<T, TI, CONFIG::MODEL_DIM, FOLD_DIM, DYNAMIC_ALLOCATION>> fold_m;
         };
         template <typename T_BUFFER_SPEC>
         struct Backward: Evaluation<T_BUFFER_SPEC>{
@@ -122,6 +135,15 @@ namespace rl_tools::nn::layers::cross_attention {
             Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> d_out_latents, d_attn;
             Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::N_TOKENS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> d_k, d_v;
             Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::N_TOKENS, CONFIG::TOKEN_DIM, DYNAMIC_ALLOCATION>> d_tokens;
+            // CUDA path: every parameter gradient follows from three batch sums, the gradient wrt
+            // fold_m (MODEL_DIM x FOLD_DIM), wrt fold_q (NUM_LATENTS*NUM_HEADS x TOKEN_DIM) and wrt b_o.
+            // Each thread block writes its partial sums into one row of fold_partials, a second
+            // kernel reduces them into fold_reduced. No atomics are involved.
+            static constexpr TI FOLD_DIM = CONFIG::NUM_HEADS * CONFIG::TOKEN_DIM;
+            static constexpr TI FOLD_N_BLOCKS = (BATCH_SIZE + CUDA_ROWS_PER_BLOCK<T> - 1) / CUDA_ROWS_PER_BLOCK<T>;
+            static constexpr TI FOLD_PARTIAL_DIM = CONFIG::MODEL_DIM * FOLD_DIM + CONFIG::NUM_LATENTS * CONFIG::NUM_HEADS * CONFIG::TOKEN_DIM + CONFIG::MODEL_DIM;
+            Matrix<matrix::Specification<T, TI, FOLD_N_BLOCKS, FOLD_PARTIAL_DIM, DYNAMIC_ALLOCATION>> fold_partials;
+            Matrix<matrix::Specification<T, TI, 1, FOLD_PARTIAL_DIM, DYNAMIC_ALLOCATION>> fold_reduced;
         };
     }
 

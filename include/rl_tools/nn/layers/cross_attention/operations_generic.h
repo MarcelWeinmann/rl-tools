@@ -319,6 +319,8 @@ namespace rl_tools{
         malloc(device, buffer.logits);
         malloc(device, buffer.attn);
         malloc(device, buffer.out_latents);
+        malloc(device, buffer.fold_q);
+        malloc(device, buffer.fold_m);
     }
     template<typename DEVICE, typename BUFFER_SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void free(DEVICE& device, nn::layers::cross_attention::buffers::Evaluation<BUFFER_SPEC>& buffer) {
@@ -329,6 +331,8 @@ namespace rl_tools{
         free(device, buffer.logits);
         free(device, buffer.attn);
         free(device, buffer.out_latents);
+        free(device, buffer.fold_q);
+        free(device, buffer.fold_m);
     }
     template<typename DEVICE, typename BUFFER_SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void malloc(DEVICE& device, nn::layers::cross_attention::buffers::Backward<BUFFER_SPEC>& buffer) {
@@ -338,6 +342,8 @@ namespace rl_tools{
         malloc(device, buffer.d_k);
         malloc(device, buffer.d_v);
         malloc(device, buffer.d_tokens);
+        malloc(device, buffer.fold_partials);
+        malloc(device, buffer.fold_reduced);
     }
     template<typename DEVICE, typename BUFFER_SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void free(DEVICE& device, nn::layers::cross_attention::buffers::Backward<BUFFER_SPEC>& buffer) {
@@ -347,6 +353,8 @@ namespace rl_tools{
         free(device, buffer.d_k);
         free(device, buffer.d_v);
         free(device, buffer.d_tokens);
+        free(device, buffer.fold_partials);
+        free(device, buffer.fold_reduced);
     }
 
     template<typename DEVICE, typename SPEC, typename RNG>

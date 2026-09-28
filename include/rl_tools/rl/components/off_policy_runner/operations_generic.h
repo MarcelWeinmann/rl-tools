@@ -48,6 +48,16 @@ namespace rl_tools{
         malloc(device, runner.buffers);
         malloc(device, runner.envs);
         malloc(device, runner.states);
+        malloc(device, runner.n_step_observations);
+        if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS){
+            malloc(device, runner.n_step_observations_privileged);
+        }
+        else{
+            runner.n_step_observations_privileged = view(device, runner.n_step_observations);
+        }
+        malloc(device, runner.n_step_actions);
+        malloc(device, runner.n_step_rewards);
+        malloc(device, runner.n_step_count);
         malloc(device, runner.env_parameters);
         malloc(device, runner.episode_return);
         malloc(device, runner.episode_step);
@@ -134,6 +144,16 @@ namespace rl_tools{
         free(device, runner.buffers);
         free(device, runner.envs);
         free(device, runner.states);
+        free(device, runner.n_step_observations);
+        if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS){
+            free(device, runner.n_step_observations_privileged);
+        }
+        else{
+            runner.n_step_observations_privileged._data = nullptr;
+        }
+        free(device, runner.n_step_actions);
+        free(device, runner.n_step_rewards);
+        free(device, runner.n_step_count);
         free(device, runner.env_parameters);
         free(device, runner.episode_return);
         free(device, runner.episode_step);
@@ -151,6 +171,36 @@ namespace rl_tools{
     template<typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void truncate_all(DEVICE& device, rl::components::OffPolicyRunner<SPEC> &runner){
         set_all(device, runner.truncated, true);
+    }
+    // Continue the running episodes of source in target, e.g. when collection switches between an
+    // online and an offline runner. Without this the target would pair its stale window from its
+    // last use with the current state. Copies about 3 KB per env for tam_sophy. Recurrent policy
+    // states are not carried over. The source's buffer segment is closed so no sequence spans the
+    // switch.
+    template<typename DEVICE, typename SPEC>
+    void transfer_episode(DEVICE& device, rl::components::OffPolicyRunner<SPEC>& source, rl::components::OffPolicyRunner<SPEC>& target){
+        using TI = typename DEVICE::index_t;
+        copy(device, device, source.states, target.states);
+        copy(device, device, source.n_step_observations, target.n_step_observations);
+        if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS){
+            copy(device, device, source.n_step_observations_privileged, target.n_step_observations_privileged);
+        }
+        copy(device, device, source.n_step_actions, target.n_step_actions);
+        copy(device, device, source.n_step_rewards, target.n_step_rewards);
+        copy(device, device, source.n_step_count, target.n_step_count);
+        copy(device, device, source.episode_step, target.episode_step);
+        copy(device, device, source.episode_return, target.episode_return);
+        copy(device, device, source.truncated, target.truncated);
+        // the action applied from the current state is stored with the next transition
+        copy(device, device, source.buffers.actions, target.buffers.actions);
+        for (TI env_i = 0; env_i < SPEC::PARAMETERS::N_ENVIRONMENTS; env_i++){
+            auto& replay_buffer = get(source.replay_buffers, 0, env_i);
+            if (replay_buffer.full || replay_buffer.position > 0){
+                TI previous_position = replay_buffer.position == 0 ? SPEC::PARAMETERS::REPLAY_BUFFER_CAPACITY - 1 : replay_buffer.position - 1;
+                set(replay_buffer.truncated, previous_position, 0, true);
+                replay_buffer.current_episode_start = replay_buffer.position;
+            }
+        }
     }
     template<typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void set_parameters(DEVICE& device, rl::components::OffPolicyRunner<SPEC> &runner, typename SPEC::ENVIRONMENT::Parameters &parameters){
@@ -498,6 +548,13 @@ namespace rl_tools{
     RL_TOOLS_FUNCTION_PLACEMENT void copy(SOURCE_DEVICE& source_device, TARGET_DEVICE& target_device, rl::components::OffPolicyRunner<SOURCE_SPEC>& source, rl::components::OffPolicyRunner<TARGET_SPEC>& target){
         copy(source_device, target_device, source.buffers, target.buffers);
         copy(source_device, target_device, source.states, target.states);
+        copy(source_device, target_device, source.n_step_observations, target.n_step_observations);
+        if constexpr(SOURCE_SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS){
+            copy(source_device, target_device, source.n_step_observations_privileged, target.n_step_observations_privileged);
+        }
+        copy(source_device, target_device, source.n_step_actions, target.n_step_actions);
+        copy(source_device, target_device, source.n_step_rewards, target.n_step_rewards);
+        copy(source_device, target_device, source.n_step_count, target.n_step_count);
         copy(source_device, target_device, source.episode_return, target.episode_return);
         copy(source_device, target_device, source.episode_step, target.episode_step);
         copy(source_device, target_device, source.truncated, target.truncated);

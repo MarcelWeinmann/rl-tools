@@ -16,6 +16,8 @@ namespace rl_tools{
         malloc(device, optimizer.first_order_moment_bias_correction);
         malloc(device, optimizer.second_order_moment_bias_correction);
         malloc(device, optimizer.parameters);
+        malloc(device, optimizer.gradient_squared_norm);
+        malloc(device, optimizer.gradient_scale);
     }
     template <typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void free(DEVICE& device, nn::optimizers::Adam<SPEC>& optimizer){
@@ -23,6 +25,8 @@ namespace rl_tools{
         free(device, optimizer.first_order_moment_bias_correction);
         free(device, optimizer.second_order_moment_bias_correction);
         free(device, optimizer.parameters);
+        free(device, optimizer.gradient_squared_norm);
+        free(device, optimizer.gradient_scale);
     }
     template <typename DEVICE, typename SPEC>
     RL_TOOLS_FUNCTION_PLACEMENT void init(DEVICE& device, nn::optimizers::Adam<SPEC>& optimizer){

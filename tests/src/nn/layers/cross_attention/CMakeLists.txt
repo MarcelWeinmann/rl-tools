@@ -7,3 +7,7 @@ target_link_libraries(benchmark_nn_layers_cross_attention_blas PRIVATE RLtools::
 if(NOT CMAKE_BUILD_TYPE MATCHES Debug)
     target_compile_options(benchmark_nn_layers_cross_attention_blas PRIVATE -O3 -march=native)
 endif()
+
+if(RL_TOOLS_BACKEND_ENABLE_CUDA)
+    add_subdirectory(cuda)
+endif()

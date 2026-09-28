@@ -6,6 +6,7 @@
 //#include "operations_generic.h"
 #include "../../../devices/cuda.h"
 #include "../../../nn/parameters/operations_cuda.h"
+#include "../../../nn/optimizers/adam/instance/operations_cuda.h" // transform_gradient, GradientSquaredNorm
 #include "../../../nn/nn.h"
 #include "../../../mode/mode.h"
 
@@ -126,6 +127,9 @@ namespace rl_tools{
             nn::dense::kernels::activation_kernel<<<activation_grid, activation_block, 0, device.stream>>>(tag_device, layer, pre_activations, output);
             check_status(device);
         }
+        // One thread per element. This used to be one thread per output column looping over the
+        // batch (and accumulating a sum it then discarded), which left all but 8 warps of the GPU
+        // idle: ~47 us for a 256 x 256 layer.
         template<typename DEV_SPEC, typename SPEC, typename PRE_ACTIVATIONS_SPEC, typename D_OUTPUT_SPEC, typename D_PRE_ACTIVATIONS_SPEC>
         __global__ void
         d_activation_kernel(devices::CUDA<DEV_SPEC> device, const nn::layers::dense::LayerForward<SPEC> layer, Matrix<PRE_ACTIVATIONS_SPEC> pre_activations, Matrix<D_OUTPUT_SPEC> d_output, Matrix<D_PRE_ACTIVATIONS_SPEC> d_pre_activations) {
@@ -135,28 +139,29 @@ namespace rl_tools{
             static_assert(containers::check_structure<PRE_ACTIVATIONS_SPEC, D_OUTPUT_SPEC>);
             static_assert(containers::check_structure<D_OUTPUT_SPEC, D_PRE_ACTIVATIONS_SPEC>);
             constexpr TI BATCH_SIZE = PRE_ACTIVATIONS_SPEC::ROWS;
-
             TI output_i = blockIdx.x * blockDim.x + threadIdx.x;
-            if(output_i < OUTPUT_DIM){
-                T acc = 0;
-                for(TI batch_i = 0; batch_i < BATCH_SIZE; batch_i++){
-                    T d_pre_activation_temp = d_activation_d_x<typename DEV_SPEC::MATH, T, SPEC::ACTIVATION_FUNCTION>(get(pre_activations, batch_i, output_i)) * get(d_output, batch_i, output_i);
-                    set(d_pre_activations, batch_i, output_i, d_pre_activation_temp);
-                    acc += d_pre_activation_temp;
-                }
+            TI batch_i = blockIdx.y * blockDim.y + threadIdx.y;
+            if(output_i < OUTPUT_DIM && batch_i < BATCH_SIZE){
+                T d_pre_activation = d_activation_d_x<typename DEV_SPEC::MATH, T, SPEC::ACTIVATION_FUNCTION>(get(pre_activations, batch_i, output_i)) * get(d_output, batch_i, output_i);
+                set(d_pre_activations, batch_i, output_i, d_pre_activation);
             }
         }
         template<typename DEV_SPEC, typename SPEC, typename PRE_ACTIVATIONS_SPEC, typename D_OUTPUT_SPEC, typename D_PRE_ACTIVATIONS_SPEC>
         void d_activation(devices::CUDA<DEV_SPEC>& device, const nn::layers::dense::LayerForward<SPEC>& layer, Matrix<PRE_ACTIVATIONS_SPEC>& pre_activations, Matrix<D_OUTPUT_SPEC>& d_output, Matrix<D_PRE_ACTIVATIONS_SPEC>& d_pre_activations) {
             using DEVICE = devices::CUDA<DEV_SPEC>;
-            constexpr typename devices::CUDA<DEV_SPEC>::index_t BLOCKSIZE_ACTIVATION_OUTPUT = 32;
-            constexpr typename devices::CUDA<DEV_SPEC>::index_t N_BLOCKS_ACTIVATION_OUTPUT = RL_TOOLS_DEVICES_CUDA_CEIL(SPEC::OUTPUT_DIM, BLOCKSIZE_ACTIVATION_OUTPUT);
-            dim3 activation_grid(N_BLOCKS_ACTIVATION_OUTPUT);
-            dim3 activation_block(BLOCKSIZE_ACTIVATION_OUTPUT);
+            using TI = typename DEVICE::index_t;
+            constexpr TI BLOCKSIZE_OUTPUT = 32;
+            constexpr TI BLOCKSIZE_BATCH = 8;
+            dim3 grid(RL_TOOLS_DEVICES_CUDA_CEIL(SPEC::OUTPUT_DIM, BLOCKSIZE_OUTPUT), RL_TOOLS_DEVICES_CUDA_CEIL(PRE_ACTIVATIONS_SPEC::ROWS, BLOCKSIZE_BATCH));
+            dim3 block(BLOCKSIZE_OUTPUT, BLOCKSIZE_BATCH);
             devices::cuda::TAG<DEVICE, true> tag_device{};
-            nn::dense::kernels::d_activation_kernel<<<activation_grid, activation_block, 0, device.stream>>>(tag_device, layer, pre_activations, d_output, d_pre_activations);
+            nn::dense::kernels::d_activation_kernel<<<grid, block, 0, device.stream>>>(tag_device, layer, pre_activations, d_output, d_pre_activations);
             check_status(device);
         }
+        // A block covers 32 output columns and the whole batch: its 32 x 32 threads walk the rows
+        // with stride 32 and reduce the bias gradient in shared memory. Deterministic (no atomics),
+        // and ~10x faster than the previous one thread per column serial loop.
+        constexpr int D_ACTIVATION_BIAS_BLOCK_ROWS = 32;
         template<typename DEV_SPEC, typename SPEC, typename PRE_ACTIVATIONS_SPEC, typename D_OUTPUT_SPEC, typename D_BIASES_SPEC, typename D_PRE_ACTIVATIONS_SPEC>
         __global__ void
         d_activation_accumulate_bias_gradient_kernel(devices::CUDA<DEV_SPEC> device, const nn::layers::dense::LayerForward<SPEC> layer, Matrix<PRE_ACTIVATIONS_SPEC> pre_activations, Matrix<D_OUTPUT_SPEC> d_output, Tensor<D_BIASES_SPEC> d_biases, Matrix<D_PRE_ACTIVATIONS_SPEC> d_pre_activations) {
@@ -167,33 +172,48 @@ namespace rl_tools{
             static_assert(containers::check_structure<D_OUTPUT_SPEC, D_PRE_ACTIVATIONS_SPEC>);
             constexpr TI BATCH_SIZE = PRE_ACTIVATIONS_SPEC::ROWS;
             static_assert(PRE_ACTIVATIONS_SPEC::COLS == D_BIASES_SPEC::SHAPE::FIRST);
+            __shared__ T partial[D_ACTIVATION_BIAS_BLOCK_ROWS][32 + 1];
 
-            TI output_i = blockIdx.x * blockDim.x + threadIdx.x;
+            const TI output_i = blockIdx.x * blockDim.x + threadIdx.x;
+            T acc = 0;
             if(output_i < OUTPUT_DIM){
-                T acc = 0;
-                for(TI batch_i = 0; batch_i < BATCH_SIZE; batch_i++){
-                    T d_pre_activation_temp = d_activation_d_x<typename DEV_SPEC::MATH, T, SPEC::ACTIVATION_FUNCTION>(get(pre_activations, batch_i, output_i)) * get(d_output, batch_i, output_i);
-                    set(d_pre_activations, batch_i, output_i, d_pre_activation_temp);
-                    acc += d_pre_activation_temp;
+                for(TI batch_i = threadIdx.y; batch_i < BATCH_SIZE; batch_i += blockDim.y){
+                    T d_pre_activation = d_activation_d_x<typename DEV_SPEC::MATH, T, SPEC::ACTIVATION_FUNCTION>(get(pre_activations, batch_i, output_i)) * get(d_output, batch_i, output_i);
+                    set(d_pre_activations, batch_i, output_i, d_pre_activation);
+                    acc += d_pre_activation;
                 }
-                increment(device, d_biases, acc, output_i);
+            }
+            partial[threadIdx.y][threadIdx.x] = acc;
+            __syncthreads();
+            for(TI stride = D_ACTIVATION_BIAS_BLOCK_ROWS / 2; stride > 0; stride /= 2){
+                if(threadIdx.y < stride){
+                    partial[threadIdx.y][threadIdx.x] += partial[threadIdx.y + stride][threadIdx.x];
+                }
+                __syncthreads();
+            }
+            if(threadIdx.y == 0 && output_i < OUTPUT_DIM){
+                increment(device, d_biases, partial[0][threadIdx.x], output_i);
             }
         }
         template<typename DEV_SPEC, typename SPEC, typename PRE_ACTIVATIONS_SPEC, typename D_OUTPUT_SPEC, typename D_BIASES_SPEC, typename D_PRE_ACTIVATIONS_SPEC>
         void d_activation_accumulate_bias_gradient(devices::CUDA<DEV_SPEC>& device, const nn::layers::dense::LayerForward<SPEC>& layer, Matrix<PRE_ACTIVATIONS_SPEC>& pre_activations, Matrix<D_OUTPUT_SPEC>& d_output, Tensor<D_BIASES_SPEC>& d_biases, Matrix<D_PRE_ACTIVATIONS_SPEC>& d_pre_activations) {
             using DEVICE = devices::CUDA<DEV_SPEC>;
-            constexpr typename devices::CUDA<DEV_SPEC>::index_t BLOCKSIZE_ACTIVATION_OUTPUT = 32;
-            constexpr typename devices::CUDA<DEV_SPEC>::index_t N_BLOCKS_ACTIVATION_OUTPUT = RL_TOOLS_DEVICES_CUDA_CEIL(SPEC::OUTPUT_DIM, BLOCKSIZE_ACTIVATION_OUTPUT);
-            dim3 activation_grid(N_BLOCKS_ACTIVATION_OUTPUT);
-            dim3 activation_block(BLOCKSIZE_ACTIVATION_OUTPUT);
+            using TI = typename DEVICE::index_t;
+            constexpr TI BLOCKSIZE_OUTPUT = 32;
+            dim3 grid(RL_TOOLS_DEVICES_CUDA_CEIL(SPEC::OUTPUT_DIM, BLOCKSIZE_OUTPUT));
+            dim3 block(BLOCKSIZE_OUTPUT, D_ACTIVATION_BIAS_BLOCK_ROWS);
             devices::cuda::TAG<DEVICE, true> tag_device{};
-            nn::dense::kernels::d_activation_accumulate_bias_gradient_kernel<<<activation_grid, activation_block, 0, device.stream>>>(tag_device, layer, pre_activations, d_output, d_biases, d_pre_activations);
+            nn::dense::kernels::d_activation_accumulate_bias_gradient_kernel<<<grid, block, 0, device.stream>>>(tag_device, layer, pre_activations, d_output, d_biases, d_pre_activations);
             check_status(device);
         }
         template<typename DEV_SPEC, typename SPEC, typename PARAMETERS>
         __global__
         void update_kernel(devices::CUDA<DEV_SPEC> device, nn::layers::dense::LayerGradient<SPEC> layer, nn::optimizers::Adam<PARAMETERS> optimizer) {
-            // fully fused adam update
+            // fully fused adam update. Applies the same gradient transformations (global norm factor,
+            // element-wise clamp) as the generic per parameter update, but, as it always has, no weight
+            // decay: the generic update decays dense weights, this kernel does not. Adding it changes
+            // the training of every model tuned on the GPU (tam_sophy's QR-SAC was), so it is left out
+            // on purpose - apply decay explicitly if a GPU model should have it.
             using DEVICE = devices::CUDA<DEV_SPEC>;
             using T = typename SPEC::TYPE_POLICY::template GET<numeric_types::categories::Gradient>;
             using TI = typename DEVICE::index_t;
@@ -207,7 +227,7 @@ namespace rl_tools{
             if(input_i < INPUT_DIM && output_i < OUTPUT_DIM){
                 if(input_i == 0){
                     // bias
-                    T d_bias = get(device, layer.biases.gradient, output_i);
+                    T d_bias = nn::optimizers::adam::cuda::transform_gradient(device, optimizer, (T)get(device, layer.biases.gradient, output_i));
                     T d_bias_first_order_moment = optimizer_parameters.beta_1 * get(device, layer.biases.gradient_first_order_moment, output_i) + (1 - optimizer_parameters.beta_1) * d_bias;
                     set(device, layer.biases.gradient_first_order_moment, d_bias_first_order_moment, output_i);
                     T d_bias_second_order_moment = optimizer_parameters.beta_2 * get(device, layer.biases.gradient_second_order_moment, output_i) + (1 - optimizer_parameters.beta_2) * d_bias * d_bias;
@@ -215,11 +235,14 @@ namespace rl_tools{
                     T pre_sqrt_term = d_bias_second_order_moment * get(device, optimizer.second_order_moment_bias_correction, 0);
                     pre_sqrt_term = math::max(device.math, pre_sqrt_term, (T)optimizer_parameters.epsilon_sqrt);
                     T bias_update = optimizer_parameters.alpha * get(device, optimizer.first_order_moment_bias_correction, 0) * d_bias_first_order_moment / (math::sqrt(typename DEVICE::SPEC::MATH_DEVICE_ACCURATE(), pre_sqrt_term) + optimizer_parameters.epsilon);
+                    if constexpr(PARAMETERS::ENABLE_BIAS_LR_FACTOR){
+                        bias_update *= optimizer_parameters.bias_lr_factor;
+                    }
                     increment(device, layer.biases.parameters, -bias_update, output_i);
                 }
                 {
                     // weight
-                    T d_weight = get(device, layer.weights.gradient, output_i, input_i);
+                    T d_weight = nn::optimizers::adam::cuda::transform_gradient(device, optimizer, (T)get(device, layer.weights.gradient, output_i, input_i));
                     T d_weight_first_order_moment = optimizer_parameters.beta_1 * get(device, layer.weights.gradient_first_order_moment, output_i, input_i) + (1 - optimizer_parameters.beta_1) * d_weight;
                     set(device, layer.weights.gradient_first_order_moment, d_weight_first_order_moment, output_i, input_i);
                     T d_weight_second_order_moment = optimizer_parameters.beta_2 * get(device, layer.weights.gradient_second_order_moment, output_i, input_i) + (1 - optimizer_parameters.beta_2) * d_weight * d_weight;
@@ -443,6 +466,12 @@ namespace rl_tools{
         devices::cuda::TAG<DEVICE, true> tag_device{};
         nn::dense::kernels::update_kernel<<<activation_grid, activation_block, 0, device.stream>>>(tag_device, layer, optimizer);
         check_status(device);
+    }
+    // global gradient norm (see nn/optimizers/adam/operations_cuda.h step())
+    template<typename DEV_SPEC, typename SPEC, typename ADAM_SPEC>
+    void update(devices::CUDA<DEV_SPEC>& device, nn::layers::dense::LayerGradient<SPEC>& layer, nn::optimizers::adam::cuda::GradientSquaredNorm<ADAM_SPEC>& accumulator) {
+        nn::optimizers::adam::cuda::accumulate_squared_norm(device, layer.weights.gradient, accumulator.optimizer.gradient_squared_norm);
+        nn::optimizers::adam::cuda::accumulate_squared_norm(device, layer.biases.gradient, accumulator.optimizer.gradient_squared_norm);
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

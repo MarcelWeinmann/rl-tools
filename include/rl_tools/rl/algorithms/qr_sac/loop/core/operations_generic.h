@@ -107,6 +107,15 @@ namespace rl_tools{
     }
 
 
+    // The runner that collects the current step: the offline (persistent) one during warmup and
+    // whenever the caller asks for persistent data, the online one otherwise. Callers that feed the
+    // runner from outside (tam_sophy) use this to write the state into, and read the action from,
+    // the runner that step() advances.
+    template <typename T_CONFIG>
+    RL_TOOLS_FUNCTION_PLACEMENT auto& collection_runner(rl::algorithms::qr_sac::loop::core::State<T_CONFIG>& ts, bool write_persistent){
+        const bool online = !write_persistent && ts.step >= T_CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS;
+        return online ? ts.off_policy_runner_online : ts.off_policy_runner_offline;
+    }
     template <typename DEVICE, typename T_CONFIG>
     RL_TOOLS_FUNCTION_PLACEMENT bool step(DEVICE& device, rl::algorithms::qr_sac::loop::core::State<T_CONFIG>& ts, bool write_persistent=false){
         using CONFIG = T_CONFIG;
@@ -116,12 +125,7 @@ namespace rl_tools{
             return true;
         }
         set_step(device, device.logger, ts.step);
-        if(!write_persistent && ts.step >= CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS){
-            step<1>(device, ts.off_policy_runner_online, get_actor(ts), ts.actor_buffers_eval, ts.rng);
-        }
-        else{
-            step<1>(device, ts.off_policy_runner_offline, get_actor(ts), ts.actor_buffers_eval, ts.rng);
-        }
+        step<1>(device, collection_runner(ts, write_persistent), get_actor(ts), ts.actor_buffers_eval, ts.rng);
         bool train_critic_flag = ts.step >= (CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS + CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC) && ts.step % CONFIG::CORE_PARAMETERS::QR_SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0;
         bool update_critic_targets_flag = ts.step >= (CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS + CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_CRITIC) && ts.step % CONFIG::CORE_PARAMETERS::QR_SAC_PARAMETERS::CRITIC_TARGET_UPDATE_INTERVAL == 0;
         bool train_actor_flag = ts.step >= (CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS + CONFIG::CORE_PARAMETERS::N_WARMUP_STEPS_ACTOR) && ts.step % CONFIG::CORE_PARAMETERS::QR_SAC_PARAMETERS::ACTOR_TRAINING_INTERVAL == 0;

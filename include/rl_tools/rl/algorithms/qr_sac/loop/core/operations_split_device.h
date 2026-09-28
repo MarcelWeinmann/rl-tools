@@ -58,12 +58,7 @@ namespace rl_tools{
         set_step(host_device, host_device.logger, host_ts.step);
 
         // ---- experience collection, host side, using the host copy of the policy ----
-        if(!write_persistent && host_ts.step >= HOST_PARAMETERS::N_WARMUP_STEPS){
-            step<1>(host_device, host_ts.off_policy_runner_online, get_actor(host_ts), host_ts.actor_buffers_eval, host_ts.rng);
-        }
-        else{
-            step<1>(host_device, host_ts.off_policy_runner_offline, get_actor(host_ts), host_ts.actor_buffers_eval, host_ts.rng);
-        }
+        step<1>(host_device, collection_runner(host_ts, write_persistent), get_actor(host_ts), host_ts.actor_buffers_eval, host_ts.rng);
 
         bool train_critic_flag = host_ts.step >= (HOST_PARAMETERS::N_WARMUP_STEPS + HOST_PARAMETERS::N_WARMUP_STEPS_CRITIC) && host_ts.step % QR_SAC_PARAMETERS::CRITIC_TRAINING_INTERVAL == 0;
         bool update_critic_targets_flag = host_ts.step >= (HOST_PARAMETERS::N_WARMUP_STEPS + HOST_PARAMETERS::N_WARMUP_STEPS_CRITIC) && host_ts.step % QR_SAC_PARAMETERS::CRITIC_TARGET_UPDATE_INTERVAL == 0;

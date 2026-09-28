@@ -57,7 +57,18 @@ namespace rl_tools{
 
         set_broadcast(device, matrix_view(device, layer.biases.parameters), output);
 
-        if constexpr(utils::typing::is_same_v<T, float>){
+        if constexpr(BATCH_SIZE == 1 && INPUT_SPEC::COL_PITCH == 1 && OUTPUT_SPEC::COL_PITCH == 1){
+            // single row (rollout inference): output = weights @ input as a gemv. The gemm call spent
+            // most of its time packing the operands (sgemm_incopy was ~4.5% of the whole tam_sophy
+            // simulation process during collection).
+            if constexpr(utils::typing::is_same_v<T, float>){
+                cblas_sgemv(CblasRowMajor, CblasNoTrans, n, k, alpha, layer.weights.parameters._data, decltype(layer.weights.parameters)::SPEC::STRIDE::FIRST, input._data, 1, beta, output._data, 1);
+            }
+            else{
+                cblas_dgemv(CblasRowMajor, CblasNoTrans, n, k, alpha, layer.weights.parameters._data, decltype(layer.weights.parameters)::SPEC::STRIDE::FIRST, input._data, 1, beta, output._data, 1);
+            }
+        }
+        else if constexpr(utils::typing::is_same_v<T, float>){
             cblas_sgemm(CblasRowMajor, CblasNoTrans, CblasTrans, m, n, k, alpha, input._data, row_pitch(input), layer.weights.parameters._data, decltype(layer.weights.parameters)::SPEC::STRIDE::FIRST, beta, output._data, row_pitch(output));
         }
         else{

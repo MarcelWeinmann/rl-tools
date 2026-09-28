@@ -73,6 +73,11 @@ namespace rl_tools::nn::optimizers{
         Tensor<tensor::Specification<T, TI, tensor::Shape<TI, 1>, SPEC::DYNAMIC_ALLOCATION>> first_order_moment_bias_correction;
         Tensor<tensor::Specification<T, TI, tensor::Shape<TI, 1>, SPEC::DYNAMIC_ALLOCATION>> second_order_moment_bias_correction;
         Tensor<tensor::Specification<TI, TI, tensor::Shape<TI, 1>, SPEC::DYNAMIC_ALLOCATION>> age;
+        // Global gradient norm clipping on accelerators (operations_cuda.h): the squared L2 norm is
+        // accumulated here on the device and turned into the factor the update kernels multiply every
+        // gradient with, so clipping needs no host round trip. Unused by the CPU path.
+        Tensor<tensor::Specification<T, TI, tensor::Shape<TI, 1>, SPEC::DYNAMIC_ALLOCATION>> gradient_squared_norm;
+        Tensor<tensor::Specification<T, TI, tensor::Shape<TI, 1>, SPEC::DYNAMIC_ALLOCATION>> gradient_scale;
     };
 
 

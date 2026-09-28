@@ -47,6 +47,7 @@ namespace rl_tools::rl::components::off_policy_runner{
             sample_initial_state(device, env, parameters, state, rng);
             set(runner.episode_step, 0, env_i, 0);
             set(runner.episode_return, 0, env_i, 0);
+            set(runner.n_step_count, 0, env_i, 0);
             auto& replay_buffer = get(runner.replay_buffers, 0, env_i);
             if (replay_buffer.full || replay_buffer.position > 0){
                 TI previous_position = replay_buffer.position - 1;
@@ -64,62 +65,89 @@ namespace rl_tools::rl::components::off_policy_runner{
             observe(device, env, parameters, state, typename ENVIRONMENT::ObservationPrivileged{}, observation_privileged, rng);
         }
     }
+    // Called between the prologue (o_k = observe(s_k) in buffers.observations) and the interlude
+    // (a_k = pi(o_k) into buffers.actions). s_k was written into states[0] by the caller, and
+    // buffers.actions still holds the action that was applied from s_{k-1}. With m = count - N the
+    // stored transition is the standard uncorrected N-step one (GT Sophy, D4PG, Rainbow):
+    // (o_m, a_m, R = sum_{j<N} gamma^j r_{m+1+j}, o_k), bootstrapped by the critic with gamma^N.
+    // One observe and one reward per step, no state history.
     template<typename DEVICE, typename SPEC, typename POLICY, typename RNG>
     RL_TOOLS_FUNCTION_PLACEMENT void epilogue_per_env(DEVICE& device, rl::components::OffPolicyRunner<SPEC>& runner, const POLICY& policy, RNG &rng, typename DEVICE::index_t env_i) {
         using T = typename SPEC::TYPE_POLICY::DEFAULT;
         using TI = typename SPEC::TI;
         using ENVIRONMENT = typename SPEC::ENVIRONMENT;
-        auto observation                 = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM>(   device, runner.buffers.observations           , env_i, 0);
-        auto observation_privileged      = view<DEVICE, typename decltype(runner.buffers.observations_privileged)::SPEC, 1, SPEC::OBSERVATION_DIM_PRIVILEGED>(device, runner.buffers.observations_privileged, env_i, 0);
-        auto next_observation            = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM>(   device, runner.buffers.next_observations           , env_i, 0);
-        auto next_observation_privileged = view<DEVICE, typename decltype(runner.buffers.observations_privileged)::SPEC, 1, SPEC::OBSERVATION_DIM_PRIVILEGED>(device, runner.buffers.next_observations_privileged, env_i, 0);
+        constexpr TI N = SPEC::PARAMETERS::N_STEP_RETURNS;
+        constexpr T GAMMA = SPEC::PARAMETERS::GAMMA;
+        auto observation            = view<DEVICE, typename decltype(runner.buffers.observations           )::SPEC, 1, ENVIRONMENT::Observation::DIM>(   device, runner.buffers.observations           , env_i, 0);
+        auto observation_privileged = view<DEVICE, typename decltype(runner.buffers.observations_privileged)::SPEC, 1, SPEC::OBSERVATION_DIM_PRIVILEGED>(device, runner.buffers.observations_privileged, env_i, 0);
         auto& env = get(runner.envs, 0, env_i);
         auto& parameters = get(runner.env_parameters, 0, env_i);
+        auto& state = get(runner.states, 0, env_i);
+        auto& previous_state = get(runner.states, 1, env_i);
+        const TI count = get(runner.n_step_count, 0, env_i); // == k, the step index within the episode
+        bool truncated = false;
 
-        // get and observe the N_STEP state and create the observations
-        auto& state = get(runner.states, SPEC::PARAMETERS::N_STEP_RETURNS, env_i);
-        observe(device, env, parameters, state, typename ENVIRONMENT::Observation{}, observation, rng);
-        if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS) {
-            observe(device, env, parameters, state, typename ENVIRONMENT::ObservationPrivileged{}, observation_privileged, rng);
-        }
-
-        // step environment
-        auto& next_state = get(runner.states, 0, env_i);
-        auto action = row(device, runner.buffers.actions, env_i);
-        step(device, env, parameters, state, action, next_state, rng);
-
-        // calculate the N_STEP reward
-        T reward_value = reward(device, env, parameters, state, action, next_state, rng);
-        for (size_t i = 1; i < SPEC::PARAMETERS::N_STEP_RETURNS; i++) {
-            auto& n_step_state = get(runner.states, i - 1, env_i);
-            T multiplier = std::pow(SPEC::PARAMETERS::GAMMA, i);
-            reward_value += multiplier * reward(device, env, parameters, state, action, n_step_state, rng);
-        }
-
+        if (count > 0) {
+            // element-wise rather than copy(): this also runs inside the CUDA epilogue kernel,
+            // where the device copy() (cudaMemcpyAsync) is not callable
+            const TI previous_row = env_i * N + (count - 1) % N;
+            for (TI i = 0; i < ENVIRONMENT::ACTION_DIM; i++){
+                set(runner.n_step_actions, previous_row, i, get(runner.buffers.actions, env_i, i));
+            }
+            auto action = row(device, runner.buffers.actions, env_i);
+            T reward_value = reward(device, env, parameters, previous_state, action, state, rng);
+            set(runner.n_step_rewards, env_i, (count - 1) % N, reward_value);
 #if !defined(__CUDA_ARCH__) // this is a hack but convenient right now, would be good to add a "null-dispatch" for cuda or even better: add a device logger in cuda
-        log_reward(device, env, parameters, state, action, next_state, rng, 331);
+            log_reward(device, env, parameters, previous_state, action, state, rng, 331);
 #endif
+            bool terminated_flag = terminated(device, env, parameters, state, rng);
+            increment(runner.episode_step, 0, env_i, 1);
+            increment(runner.episode_return, 0, env_i, reward_value);
+            truncated = terminated_flag || get(runner.episode_step, 0, env_i) == SPEC::PARAMETERS::EPISODE_STEP_LIMIT;
 
-        observe(device, env, parameters, next_state, typename ENVIRONMENT::Observation{}, next_observation, rng);
-        if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS) {
-            observe(device, env, parameters, next_state, typename ENVIRONMENT::ObservationPrivileged{}, next_observation_privileged, rng);
+            // Discounted returns of all windows that end at s_k, newest first: window_return[i]
+            // starts at step count - 1 - i. N FMAs.
+            const TI n_windows = count < N ? count : N;
+            T window_return[N];
+            T accumulated = 0;
+            for (TI i = 0; i < n_windows; i++){
+                accumulated = get(runner.n_step_rewards, env_i, (count - 1 - i) % N) + GAMMA * accumulated;
+                window_return[i] = accumulated;
+            }
+            // The full window is stored every step. On termination the shorter windows are flushed
+            // too, so the steps right before a crash reach the buffer; their bootstrap is cut, so the
+            // missing discount powers do not matter. On a pure time limit they are dropped because the
+            // critic always bootstraps with gamma^N.
+            const bool full_window = count >= N;
+            if (full_window || terminated_flag){
+                const TI i_first = n_windows - 1;
+                const TI i_last = terminated_flag ? 0 : i_first;
+                auto& replay_buffer = get(runner.replay_buffers, 0, env_i);
+                for (TI i = i_first + 1; i-- > i_last;){
+                    const TI start_row = env_i * N + (count - 1 - i) % N;
+                    auto window_observation            = view<DEVICE, typename decltype(runner.n_step_observations)::SPEC, 1, ENVIRONMENT::Observation::DIM>(device, runner.n_step_observations, start_row, 0);
+                    auto window_observation_privileged = view<DEVICE, typename decltype(runner.n_step_observations_privileged)::SPEC, 1, SPEC::OBSERVATION_DIM_PRIVILEGED>(device, runner.n_step_observations_privileged, start_row, 0);
+                    auto window_start_action = row(device, runner.n_step_actions, start_row);
+                    add(device, replay_buffer, previous_state, window_observation, window_observation_privileged, window_start_action, window_return[i], state, observation, observation_privileged, terminated_flag, truncated && i == i_last);
+                }
+            }
         }
-
-        bool terminated_flag = terminated(device, env, parameters, next_state, rng);
-        increment(runner.episode_step, 0, env_i, 1);
-        increment(runner.episode_return, 0, env_i, reward_value);
-        auto episode_step_i = get(runner.episode_step, 0, env_i);
-        bool truncated = terminated_flag || episode_step_i == SPEC::PARAMETERS::EPISODE_STEP_LIMIT;
         set(runner.truncated, 0, env_i, truncated);
-        auto& replay_buffer = get(runner.replay_buffers, 0, env_i);
-        if (episode_step_i >= SPEC::PARAMETERS::N_STEP_RETURNS)
-            add(device, replay_buffer, state, observation, observation_privileged, action, reward_value, next_state, next_observation, next_observation_privileged, terminated_flag, truncated);
-
-        // state progression needs to come after the addition to the replay buffer because "observation" can point to the memory of runner_state.state (in the case of REQUIRES_OBSERVATION=false)
-        for (size_t i = 0; i < SPEC::PARAMETERS::N_STEP_RETURNS; i++)
-            set(runner.states, i + 1, env_i, get(runner.states, i, env_i));
-        observation = next_observation;
-        observation_privileged = next_observation_privileged;
+        if (!truncated){
+            // o_k enters the window after the emission above, which read the slot it overwrites
+            const TI row_i = env_i * N + count % N;
+            for (TI i = 0; i < ENVIRONMENT::Observation::DIM; i++){
+                set(runner.n_step_observations, row_i, i, get(runner.buffers.observations, env_i, i));
+            }
+            if constexpr(SPEC::PARAMETERS::ASYMMETRIC_OBSERVATIONS){
+                for (TI i = 0; i < SPEC::OBSERVATION_DIM_PRIVILEGED; i++){
+                    set(runner.n_step_observations_privileged, row_i, i, get(runner.buffers.observations_privileged, env_i, i));
+                }
+            }
+            set(runner.n_step_count, 0, env_i, count + 1);
+            previous_state = state;
+        }
+        // buffers.observations keeps o_k: it is the input of the interlude that follows
     }
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END

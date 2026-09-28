@@ -55,15 +55,42 @@ namespace rl_tools{
         __global__
         void step(DEVICE device, nn::optimizers::Adam<SPEC> optimizer) {
             _step(device, optimizer);
+            set(device, optimizer.gradient_squared_norm, 0, 0);
+        }
+        // Same decision as the generic step(): a non-finite norm drops the whole gradient (factor 0),
+        // a norm above the threshold rescales it to the threshold.
+        template<typename DEVICE, typename SPEC>
+        __global__
+        void gradient_scale(DEVICE device, nn::optimizers::Adam<SPEC> optimizer) {
+            using T = typename SPEC::T;
+            constexpr T CLIP_VALUE = SPEC::DEFAULT_PARAMETERS::GRADIENT_NORM_CLIP_VALUE;
+            const T norm = math::sqrt(typename DEVICE::SPEC::MATH{}, get(device, optimizer.gradient_squared_norm, 0));
+            T scale = 1;
+            if(!isfinite(norm)){
+                scale = 0;
+            }
+            else if(norm > CLIP_VALUE){
+                scale = CLIP_VALUE / norm;
+            }
+            set(device, optimizer.gradient_scale, scale, 0);
         }
     }
+    // Unlike the generic step(), this used to skip gradient clipping entirely (neither the global
+    // norm nor the element-wise clamp, nor the NaN guard), so a model trained on the GPU saw
+    // different updates than the same model trained on the CPU. The norm is now reduced on the
+    // device and applied inside the update kernels, which keeps the step free of host syncs.
     template<typename DEV_SPEC, typename SPEC, typename MODEL>
     void step(devices::CUDA<DEV_SPEC>& device, nn::optimizers::Adam<SPEC>& optimizer, MODEL& model){
         using DEVICE = devices::CUDA<DEV_SPEC>;
-        dim3 activation_grid(1);
-        dim3 activation_block(1);
-        nn::optimizers::adam::kernels::step<<<activation_grid, activation_block, 0, device.stream>>>(device, optimizer);
+        devices::cuda::TAG<DEVICE, true> tag_device{};
+        nn::optimizers::adam::kernels::step<<<1, 1, 0, device.stream>>>(tag_device, optimizer);
         check_status(device);
+        if constexpr(SPEC::DEFAULT_PARAMETERS::ENABLE_GRADIENT_NORM_CLIPPING){
+            nn::optimizers::adam::cuda::GradientSquaredNorm<SPEC> accumulator{optimizer};
+            update(device, model, accumulator);
+            nn::optimizers::adam::kernels::gradient_scale<<<1, 1, 0, device.stream>>>(tag_device, optimizer);
+            check_status(device);
+        }
         update(device, model, optimizer);
     }
 }
