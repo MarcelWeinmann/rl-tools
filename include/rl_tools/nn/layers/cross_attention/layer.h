@@ -113,7 +113,7 @@ namespace rl_tools::nn::layers::cross_attention {
             Matrix<matrix::Specification<T, TI, CONFIG::NUM_LATENTS, BATCH_SIZE * CONFIG::N_TOKENS, DYNAMIC_ALLOCATION>> logits; // per-head scratch, also holds d_logits in the backward pass
             Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> attn;
             Matrix<matrix::Specification<T, TI, BATCH_SIZE * CONFIG::NUM_LATENTS, CONFIG::MODEL_DIM, DYNAMIC_ALLOCATION>> out_latents;
-            // Folded parameters, only used by the CUDA path. With TOKEN_DIM << MODEL_DIM the key
+            // Folded parameters, used by the CUDA and the BLAS paths. With TOKEN_DIM << MODEL_DIM the key
             // projection folds into the latent queries and the value and output projections into
             // one matrix (the queries are parameters, not activations):
             //   fold_q[l*NUM_HEADS + h][f] = 1/sqrt(HEAD_DIM) * sum_{d in head h} latents[l][d] * w_k[d][f]
@@ -122,6 +122,8 @@ namespace rl_tools::nn::layers::cross_attention {
             static constexpr TI FOLD_DIM = CONFIG::NUM_HEADS * CONFIG::TOKEN_DIM;
             Matrix<matrix::Specification<T, TI, CONFIG::NUM_LATENTS * CONFIG::NUM_HEADS, CONFIG::TOKEN_DIM, DYNAMIC_ALLOCATION>> fold_q;
             Matrix<matrix::Specification<T, TI, CONFIG::MODEL_DIM, FOLD_DIM, DYNAMIC_ALLOCATION>> fold_m;
+            // BLAS path: pt[b][l*FOLD_DIM + h*TOKEN_DIM + f] = sum_j probs[b][l,h,j] tokens[b][j][f]
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE, CONFIG::NUM_LATENTS * FOLD_DIM, DYNAMIC_ALLOCATION>> fold_pt;
         };
         template <typename T_BUFFER_SPEC>
         struct Backward: Evaluation<T_BUFFER_SPEC>{
@@ -144,6 +146,8 @@ namespace rl_tools::nn::layers::cross_attention {
             static constexpr TI FOLD_PARTIAL_DIM = CONFIG::MODEL_DIM * FOLD_DIM + CONFIG::NUM_LATENTS * CONFIG::NUM_HEADS * CONFIG::TOKEN_DIM + CONFIG::MODEL_DIM;
             Matrix<matrix::Specification<T, TI, FOLD_N_BLOCKS, FOLD_PARTIAL_DIM, DYNAMIC_ALLOCATION>> fold_partials;
             Matrix<matrix::Specification<T, TI, 1, FOLD_PARTIAL_DIM, DYNAMIC_ALLOCATION>> fold_reduced;
+            // BLAS path: gradient wrt fold_pt (dM, dQ and db_o of the BLAS path go into fold_reduced)
+            Matrix<matrix::Specification<T, TI, BATCH_SIZE, CONFIG::NUM_LATENTS * FOLD_DIM, DYNAMIC_ALLOCATION>> fold_dpt;
         };
     }
 

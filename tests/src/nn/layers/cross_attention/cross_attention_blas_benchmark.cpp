@@ -110,6 +110,9 @@ int main(){
     benchmark<float, 4, 8, 16, 2, 2, 8, 2, 256>("f32 4x8 L2 H2x8", 1000);
     // larger model dim: 8 heads x 16 -> MODEL_DIM 128
     benchmark<float, 10, 20, 32, 4, 8, 16, 3, 256>("f32 10x20 L4 H8x16", 150);
+    // tam_sophy: 5 opponent tokens x 8 features after 124 ego/track features, 4 latents, 4 heads x 32 -> MODEL_DIM 128
+    benchmark<float, 5, 8, 124, 4, 4, 32, 2, 1>("f32 5x8 L4 H4x32 (tam_sophy)", 20000);
+    benchmark<float, 5, 8, 124, 4, 4, 32, 2, 256>("f32 5x8 L4 H4x32 (tam_sophy)", 300);
     // double precision, sophy-like
     benchmark<double, 7, 14, 32, 4, 4, 16, 3, 256>("f64 7x14 L4 H4x16", 300);
     std::printf("(sink %f)\n", g_sink);

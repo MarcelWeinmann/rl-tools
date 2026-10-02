@@ -90,4 +90,8 @@ namespace rl_tools::utils::polyak {
 RL_TOOLS_NAMESPACE_WRAPPER_END
 
 
+#if defined(RL_TOOLS_BACKEND_ENABLE_OPENBLAS) && !defined(RL_TOOLS_BACKEND_DISABLE_BLAS)
+#include "operations_cpu_openblas.h"
+#endif
+
 #endif

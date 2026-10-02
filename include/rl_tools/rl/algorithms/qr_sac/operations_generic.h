@@ -284,8 +284,11 @@ namespace rl_tools{
                 mask_gradient(device, output_temp, batch.final_step_mask, true);
                 mask_gradient(device, training_buffers.target_action_value, batch.final_step_mask, true);
             }
-            T loss = nn::loss_functions::quantile_huber::evaluate(device, output_matrix_view, target_action_value_matrix_view, training_buffers.loss_weight, KAPPA);
-            add_scalar(device, device.logger, "critic_loss", loss, 50);
+            // the loss is only computed for the logger, which keeps every 50th value (~2% of a CPU update)
+            if(get_step(device, device.logger) % 50 == 0){
+                T loss = nn::loss_functions::quantile_huber::evaluate(device, output_matrix_view, target_action_value_matrix_view, training_buffers.loss_weight, KAPPA);
+                add_scalar(device, device.logger, "critic_loss", loss, 50);
+            }
         }
         backward(device, critic, batch.observations_and_actions_current, training_buffers.d_output, critic_buffers, reset_mode);
         if constexpr(CPU_DEVICE){

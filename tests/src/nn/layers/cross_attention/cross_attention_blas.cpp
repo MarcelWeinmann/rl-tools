@@ -146,6 +146,71 @@ TEST(RL_TOOLS_NN_LAYERS_CROSS_ATTENTION_BLAS, EQUIVALENCE_FLOAT){
     test_equivalence<CrossAttentionSetup<float, 40,  15,    4,  2,  2,    8,    2,  1 >, float>(1e-3); // batch 1 but above the BLAS dispatch threshold
 }
 
+// The BLAS path spreads its per-row loops over the current utils::parallel::ThreadPool. The results
+// must not depend on it: bit for bit the same values without a pool and with any number of threads.
+template <typename SETUP>
+void test_thread_pool_determinism(){
+    using LAYER = typename SETUP::LAYER;
+    using LAYER_FORWARD = rlt::nn::layers::cross_attention::LayerForward<typename LAYER::SPEC>;
+    LAYER layer_reference, layer_pool;
+    typename LAYER::template Buffer<true> buffer;
+    DEVICE_BLAS device;
+    DEVICE_GENERIC::SPEC::RANDOM::ENGINE<> rng;
+    rlt::malloc(device, rng);
+    rlt::init(device, rng, 1);
+    typename SETUP::INPUT input, d_input_reference, d_input_pool;
+    typename SETUP::OUTPUT output_reference, output_pool, d_output;
+    rlt::malloc(device, layer_reference);
+    rlt::malloc(device, layer_pool);
+    rlt::malloc(device, buffer);
+    rlt::malloc(device, input);
+    rlt::malloc(device, d_input_reference);
+    rlt::malloc(device, d_input_pool);
+    rlt::malloc(device, output_reference);
+    rlt::malloc(device, output_pool);
+    rlt::malloc(device, d_output);
+    rlt::init_weights(device, layer_reference, rng);
+    rlt::randn(device, input, rng);
+    rlt::randn(device, d_output, rng);
+    auto run = [&](LAYER& layer, typename SETUP::OUTPUT& output, typename SETUP::INPUT& d_input){
+        rlt::evaluate(device, static_cast<const LAYER_FORWARD&>(layer), input, output, buffer, rng);
+        rlt::forward(device, layer, input, buffer, rng);
+        rlt::zero_gradient(device, layer);
+        rlt::backward_full(device, layer, input, d_output, d_input, buffer);
+        rlt::backward(device, layer, input, d_output, buffer);
+    };
+    run(layer_reference, output_reference, d_input_reference);
+    for(unsigned n_threads: {2u, 5u, 8u}){
+        rlt::copy(device, device, layer_reference, layer_pool);
+        rlt::utils::parallel::ThreadPool pool(n_threads);
+        rlt::utils::parallel::ScopedThreadPool scope(&pool);
+        run(layer_pool, output_pool, d_input_pool);
+        ASSERT_EQ(rlt::abs_diff(device, output_reference, output_pool), 0) << n_threads << " threads";
+        ASSERT_EQ(rlt::abs_diff(device, rlt::output(device, layer_reference), rlt::output(device, layer_pool)), 0) << n_threads << " threads";
+        ASSERT_EQ(rlt::abs_diff(device, d_input_reference, d_input_pool), 0) << n_threads << " threads";
+        ASSERT_EQ(rlt::abs_diff(device, layer_reference.latents.gradient, layer_pool.latents.gradient), 0) << n_threads << " threads";
+        ASSERT_EQ(rlt::abs_diff(device, layer_reference.w_k.gradient, layer_pool.w_k.gradient), 0) << n_threads << " threads";
+        ASSERT_EQ(rlt::abs_diff(device, layer_reference.w_v.gradient, layer_pool.w_v.gradient), 0) << n_threads << " threads";
+        ASSERT_EQ(rlt::abs_diff(device, layer_reference.w_o.gradient, layer_pool.w_o.gradient), 0) << n_threads << " threads";
+        ASSERT_EQ(rlt::abs_diff(device, layer_reference.b_o.gradient, layer_pool.b_o.gradient), 0) << n_threads << " threads";
+    }
+    rlt::free(device, layer_reference);
+    rlt::free(device, layer_pool);
+    rlt::free(device, input);
+    rlt::free(device, d_input_reference);
+    rlt::free(device, d_input_pool);
+    rlt::free(device, output_reference);
+    rlt::free(device, output_pool);
+    rlt::free(device, d_output);
+}
+
+TEST(RL_TOOLS_NN_LAYERS_CROSS_ATTENTION_BLAS, THREAD_POOL_DETERMINISM){
+    //                                                T      N_TOK TOK_DIM OFF  LAT HEADS H_DIM SUF BATCH
+    test_thread_pool_determinism<CrossAttentionSetup<float,  5,    8,      124, 4,  4,    32,   2,  256>>(); // tam_sophy
+    test_thread_pool_determinism<CrossAttentionSetup<float,  7,    14,     32,  4,  4,    16,   3,  64 >>();
+    test_thread_pool_determinism<CrossAttentionSetup<double, 12,   9,      7,   2,  8,    4,    11, 13 >>();
+}
+
 // Finite-difference gradient check: validates the analytic gradients of a device's implementation
 // against central differences of the evaluate() output (ground truth, not just cross-implementation)
 template <typename DEVICE>

@@ -99,4 +99,11 @@ namespace rl_tools{
 }
 RL_TOOLS_NAMESPACE_WRAPPER_END
 
+// The per-parameter update is called unqualified from the layer operations, and none of its argument
+// types has rl_tools itself as an associated namespace, so device-specific overloads are only found
+// when they are declared before the layer operations (like these generic ones, see adam.h)
+#if defined(RL_TOOLS_BACKEND_ENABLE_OPENBLAS) && !defined(RL_TOOLS_BACKEND_DISABLE_BLAS)
+#include "operations_cpu_openblas.h"
+#endif
+
 #endif
